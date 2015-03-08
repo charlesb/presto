@@ -1005,7 +1005,7 @@ class AstBuilder
     @Override
     public Node visitTypeConstructor(SqlBaseParser.TypeConstructorContext context)
     {
-        String type = context.identifier().getText();
+        String type = getType(context.type());
         String value = unquote(context.STRING().getText());
 
         if (type.equalsIgnoreCase("time")) {
@@ -1310,7 +1310,11 @@ class AstBuilder
     private static String getType(SqlBaseParser.TypeContext type)
     {
         if (type.simpleType() != null) {
-            return type.simpleType().getText();
+            String signature = type.simpleType().getText();
+            if (!type.INTEGER_VALUE().isEmpty()) {
+                signature += "(" + type.INTEGER_VALUE().stream().map(Object::toString).collect(Collectors.joining(", ")) + ")";
+            }
+            return signature;
         }
 
         if (type.ARRAY() != null) {
