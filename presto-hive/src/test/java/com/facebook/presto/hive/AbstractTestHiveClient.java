@@ -634,6 +634,7 @@ public abstract class AbstractTestHiveClient
         Map<String, ColumnMetadata> map = uniqueIndex(tableMetadata.getColumns(), ColumnMetadata::getName);
 
         assertPrimitiveField(map, "t_string", VARCHAR, false);
+        assertPrimitiveField(map, "t_varchar", VARCHAR, false);
         assertPrimitiveField(map, "t_tinyint", BIGINT, false);
         assertPrimitiveField(map, "t_smallint", BIGINT, false);
         assertPrimitiveField(map, "t_int", BIGINT, false);
@@ -915,15 +916,34 @@ public abstract class AbstractTestHiveClient
                     }
 
                     rowNumber++;
+                    Object value;
 
+                    value = row.getField(columnIndex.get("t_string"));
                     if (rowNumber % 19 == 0) {
-                        assertNull(row.getField(columnIndex.get("t_string")));
+                        assertNull(value);
                     }
                     else if (rowNumber % 19 == 1) {
-                        assertEquals(row.getField(columnIndex.get("t_string")), "");
+                        assertEquals(value, "");
                     }
                     else {
-                        assertEquals(row.getField(columnIndex.get("t_string")), "test");
+                        assertEquals(value, "test");
+                    }
+
+                    value = row.getField(columnIndex.get("t_varchar"));
+                    if (rowNumber % 39 == 0) {
+                        assertNull(value);
+                    }
+                    else if (rowNumber % 39 == 1) {
+                        // RCBINARY reads empty VARCHAR as Null
+                        if (fileType == RCBINARY) {
+                            assertNull(value);
+                        }
+                        else {
+                            assertEquals(value, "");
+                        }
+                    }
+                    else {
+                        assertEquals(value, "test varchar");
                     }
 
                     assertEquals(row.getField(columnIndex.get("t_tinyint")), 1 + rowNumber);
@@ -2079,14 +2099,19 @@ public abstract class AbstractTestHiveClient
 
                 rowNumber++;
                 Integer index;
+                Object value;
 
                 // STRING
                 index = columnIndex.get("t_string");
-                if ((rowNumber % 19) == 0) {
-                    assertNull(row.getField(index));
+                value = row.getField(index);
+                if (rowNumber % 19 == 0) {
+                    assertNull(value);
+                }
+                else if (rowNumber % 19 == 1) {
+                    assertEquals(value, "");
                 }
                 else {
-                    assertEquals(row.getField(index), ((rowNumber % 19) == 1) ? "" : "test");
+                    assertEquals(value, "test");
                 }
 
                 // NUMBERS
@@ -2149,31 +2174,26 @@ public abstract class AbstractTestHiveClient
                     }
                 }
 
-                /* TODO: enable these tests when the types are supported
                 // VARCHAR(50)
                 index = columnIndex.get("t_varchar");
                 if (index != null) {
-                    if ((rowNumber % 39) == 0) {
-                        assertTrue(cursor.isNull(index));
+                    value = row.getField(index);
+                    if (rowNumber % 39 == 0) {
+                        assertNull(value);
+                    }
+                    else if (rowNumber % 39 == 1) {
+                        // RCBINARY reads empty VARCHAR as null
+                        if (hiveStorageFormat == RCBINARY) {
+                            assertNull(value);
+                        }
+                        else {
+                            assertEquals(value, "");
+                        }
                     }
                     else {
-                        String stringValue = cursor.getSlice(index).toStringUtf8();
-                        assertEquals(stringValue, ((rowNumber % 39) == 1) ? "" : "test varchar");
+                        assertEquals(value, "test varchar");
                     }
                 }
-
-                // CHAR(25)
-                index = columnIndex.get("t_char");
-                if (index != null) {
-                    if ((rowNumber % 41) == 0) {
-                        assertTrue(cursor.isNull(index));
-                    }
-                    else {
-                        String stringValue = cursor.getSlice(index).toStringUtf8();
-                        assertEquals(stringValue, ((rowNumber % 41) == 1) ? "" : "test char");
-                    }
-                }
-                */
 
                 // MAP<STRING, STRING>
                 index = columnIndex.get("t_map");
