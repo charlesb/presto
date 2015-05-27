@@ -8,7 +8,6 @@ Presto Documentation
 
     overview
     installation
-    admin
     connector
     functions
     language
