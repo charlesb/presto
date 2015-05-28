@@ -1,4 +1,20 @@
 #!/bin/bash
+#
+# Manages a Presto node service
+#
+# chkconfig: 345 85 15
+# description: Presto node
+#
+### BEGIN INIT INFO
+# Provides:          presto
+# Short-Description: presto node
+# Default-Start:     3 4 5
+# Default-Stop:      0 1 2 6
+# Required-Start:    $syslog $remote_fs
+# Required-Stop:     $syslog $remote_fs
+# Should-Start:
+# Should-Stop:
+### END INIT INFO
 
 SCRIPT_NAME=$0
 ACTION_NAME=$1
