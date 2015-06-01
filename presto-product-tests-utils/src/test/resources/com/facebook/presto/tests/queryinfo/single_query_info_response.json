@@ -8,7 +8,7 @@
     "timeZoneKey": 2103,
     "locale": "en_US",
     "remoteUserAddress": "172.16.2.1",
-    "userAgent": "StatementClient/0.101-SNAPSHOT",
+    "userAgent": "StatementClient/101t",
     "startTime": 1430841676990,
     "systemProperties": {},
     "catalogProperties": {}
