@@ -9,9 +9,9 @@ Presto Documentation
     overview
     configuration
     connector
+    querying
+    sql
     functions
     language
-    sql
-    querying
     migration
     release
