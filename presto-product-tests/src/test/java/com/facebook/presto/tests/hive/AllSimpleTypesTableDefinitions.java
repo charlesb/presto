@@ -18,6 +18,8 @@ import com.teradata.test.fulfillment.hive.DataSource;
 import com.teradata.test.fulfillment.hive.HiveTableDefinition;
 import com.teradata.test.fulfillment.table.TableDefinitionsRepository;
 
+import java.util.Optional;
+
 import static com.teradata.test.fulfillment.hive.InlineDataSource.createResourceDataSource;
 
 public final class AllSimpleTypesTableDefinitions
@@ -27,21 +29,21 @@ public final class AllSimpleTypesTableDefinitions
     }
 
     @TableDefinitionsRepository.RepositoryTableDefinition
-    public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_TEXTFILE = allHiveSimpleTypesTableDefinition("TEXTFILE");
+    public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_TEXTFILE = allHiveSimpleTypesTableDefinition("TEXTFILE", Optional.of("DELIMITED FIELDS TERMINATED BY '|'"));
 
     @TableDefinitionsRepository.RepositoryTableDefinition
     public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_PARQUET = allHiveSimpleTypesParquetTableDefinition();
 
     @TableDefinitionsRepository.RepositoryTableDefinition
-    public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_ORC = allHiveSimpleTypesTableDefinition("ORC");
+    public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_ORC = allHiveSimpleTypesTableDefinition("ORC", Optional.empty());
 
     @TableDefinitionsRepository.RepositoryTableDefinition
-    public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_RCFILE = allHiveSimpleTypesTableDefinition("RCFILE");
+    public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_RCFILE = allHiveSimpleTypesTableDefinition("RCFILE", Optional.of("SERDE 'org.apache.hadoop.hive.serde2.columnar.ColumnarSerDe'"));
 
     @TableDefinitionsRepository.RepositoryTableDefinition
     public static final HiveTableDefinition ALL_HIVE_SIMPLE_TYPES_KNOWN_TO_PRESTO_TEXTFILE = allHiveSimpleTypesKnownToPrestoTextfileTableDefinition();
 
-    private static HiveTableDefinition allHiveSimpleTypesTableDefinition(String fileFormat)
+    private static HiveTableDefinition allHiveSimpleTypesTableDefinition(String fileFormat, Optional<String> rowFormat)
     {
         String tableName = fileFormat.toLowerCase() + "_all_types";
         DataSource dataSource = createResourceDataSource(tableName, "" + System.currentTimeMillis(), "com/facebook/presto/tests/hive/data/all_types/data." + fileFormat.toLowerCase());
@@ -65,7 +67,7 @@ public final class AllSimpleTypesTableDefinitions
                         "   c_boolean            BOOLEAN," +
                         "   c_binary             BINARY" +
                         ") " +
-                        "ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' " +
+                        (rowFormat.isPresent() ? "ROW FORMAT " + rowFormat.get() + " " : " ") +
                         "STORED AS " + fileFormat + " " +
                         "LOCATION '%LOCATION%'")
                 .setDataSource(dataSource)
@@ -90,7 +92,6 @@ public final class AllSimpleTypesTableDefinitions
                         "   c_char               CHAR(10)," +
                         "   c_boolean            BOOLEAN" +
                         ") " +
-                        "ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' " +
                         "STORED AS PARQUET " +
                         "LOCATION '%LOCATION%'")
                 .setDataSource(dataSource)

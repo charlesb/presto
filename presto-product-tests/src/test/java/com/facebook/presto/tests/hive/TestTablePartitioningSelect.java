@@ -27,6 +27,7 @@ import com.teradata.test.query.QueryResult;
 import org.testng.annotations.Test;
 
 import java.sql.SQLException;
+import java.util.Optional;
 
 import static com.facebook.presto.tests.TestGroups.HIVE_CONNECTOR;
 import static com.teradata.test.Requirements.allOf;
@@ -42,10 +43,10 @@ public class TestTablePartitioningSelect
         extends ProductTest
         implements RequirementsProvider
 {
-    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONEND_TEXTFILE = singleIntColumnPartitionedTableDefinition("TEXTFILE");
-    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONED_ORC = singleIntColumnPartitionedTableDefinition("ORC");
-    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONED_RCFILE = singleIntColumnPartitionedTableDefinition("RCFILE");
-    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONED_PARQUET = singleIntColumnPartitionedTableDefinition("PARQUET");
+    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONEND_TEXTFILE = singleIntColumnPartitionedTableDefinition("TEXTFILE", Optional.of("DELIMITED FIELDS TERMINATED BY '|'"));
+    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONED_ORC = singleIntColumnPartitionedTableDefinition("ORC", Optional.empty());
+    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONED_RCFILE = singleIntColumnPartitionedTableDefinition("RCFILE", Optional.of("SERDE 'org.apache.hadoop.hive.serde2.columnar.ColumnarSerDe'"));
+    private static final HiveTableDefinition SINGLE_INT_COLUMN_PARTITIONED_PARQUET = singleIntColumnPartitionedTableDefinition("PARQUET", Optional.empty());
     private static final String TABLE_NAME = "test_table";
 
     @Inject
@@ -53,22 +54,30 @@ public class TestTablePartitioningSelect
     @Inject
     private QueryInfoClient queryInfoClient;
 
-    private static HiveTableDefinition singleIntColumnPartitionedTableDefinition(String fileFormat)
+    private static HiveTableDefinition singleIntColumnPartitionedTableDefinition(String fileFormat, Optional<String> serde)
     {
         String tableName = fileFormat.toLowerCase() + "_single_int_column_partitioned";
         DataSource dataSource = createResourceDataSource(tableName, "" + System.currentTimeMillis(), "com/facebook/presto/tests/hive/data/single_int_column/data." + fileFormat.toLowerCase());
         return HiveTableDefinition.builder()
                 .setName(tableName)
-                .setCreateTableDDLTemplate("" +
-                        "CREATE EXTERNAL TABLE %NAME%(" +
-                        "   col INT" +
-                        ") " +
-                        "PARTITIONED BY (part_col INT) " +
-                        "ROW FORMAT DELIMITED FIELDS TERMINATED BY '|' " +
-                        "STORED AS " + fileFormat)
+                .setCreateTableDDLTemplate(buildSingleIntColumnPartitionedTableDDL(fileFormat, serde))
                 .addPartition("part_col = 1", dataSource)
                 .addPartition("part_col = 2", dataSource)
                 .build();
+    }
+
+    private static String buildSingleIntColumnPartitionedTableDDL(String fileFormat, Optional<String> rowFormat)
+    {
+        StringBuilder sb = new StringBuilder();
+        sb.append("CREATE EXTERNAL TABLE %NAME%(");
+        sb.append("   col INT");
+        sb.append(") ");
+        sb.append("PARTITIONED BY (part_col INT) ");
+        if (rowFormat.isPresent()) {
+            sb.append("ROW FORMAT ").append(rowFormat.get());
+        }
+        sb.append(" STORED AS " + fileFormat);
+        return sb.toString();
     }
 
     @Override
@@ -78,7 +87,8 @@ public class TestTablePartitioningSelect
                 mutableTable(SINGLE_INT_COLUMN_PARTITIONEND_TEXTFILE, TABLE_NAME, LOADED),
                 mutableTable(SINGLE_INT_COLUMN_PARTITIONED_ORC, TABLE_NAME, LOADED),
                 mutableTable(SINGLE_INT_COLUMN_PARTITIONED_RCFILE, TABLE_NAME, LOADED),
-                mutableTable(SINGLE_INT_COLUMN_PARTITIONED_PARQUET, TABLE_NAME, LOADED));
+                mutableTable(SINGLE_INT_COLUMN_PARTITIONED_PARQUET, TABLE_NAME, LOADED)
+        );
     }
 
     @Test(groups = {HIVE_CONNECTOR})
