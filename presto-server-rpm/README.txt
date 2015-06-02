@@ -8,7 +8,7 @@ Building the RPM is currently an optional maven task and can be enabled by the '
 
     mvn install -P rpmbuild
 
-This will create the RPM under the directory presto-server/target/rpm/presto/RPMS/x86_64/
+This will create the RPM under the directory presto-server-rpm/target/rpm/presto/RPMS/x86_64/
 
 The RPM has a pre-requisite of Python >= 2.6 and <= 2.7. It also needs Oracle Java 1.8 (64-bit) pre-installed. The RPM installation will fail if any of these requirements are not
 satisfied.
