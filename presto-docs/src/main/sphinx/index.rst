@@ -7,6 +7,7 @@ Presto Documentation
     :numbered: 2
 
     overview
+    sandbox-vms
     configuration
     connector
     querying
