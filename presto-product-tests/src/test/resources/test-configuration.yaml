@@ -5,7 +5,7 @@ hdfs:
     port: 50070
 
 presto_rest:
-  base_uri: http://${databases.presto.host}:8080
+  base_uri: http://${databases.presto.server_address}/
 
 databases:
   default:
@@ -22,8 +22,9 @@ databases:
 
   presto:
     host: ${PRESTO_MASTER}
+    server_address: ${databases.presto.host}:8080
     jdbc_driver_class: com.facebook.presto.jdbc.PrestoDriver
-    jdbc_url: jdbc:presto://${databases.presto.host}:8080/hive/default
+    jdbc_url: jdbc:presto://${databases.presto.server_address}/hive/default
     jdbc_user: hdfs
     jdbc_password: na
     jdbc_pooling: false
