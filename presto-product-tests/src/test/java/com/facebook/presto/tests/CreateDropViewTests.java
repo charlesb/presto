@@ -90,4 +90,17 @@ public class CreateDropViewTests
                     .failsWithMessage("does not exist");
         });
     }
+
+    @Test(groups = {CREATE_DROP_VIEW, SMOKE})
+    public void dropViewIfExistsTest()
+            throws IOException
+    {
+        executeWith(createViewAs("SELECT * FROM nation"), view -> {
+            assertThat(query(format("DROP VIEW %s", view.getName()), UPDATE))
+                    .hasRowsCount(1);
+            assertThat(() -> query(format("DROP VIEW %s", view.getName())))
+                    .failsWithMessage("does not exist");
+            assertThat(() -> query(format("DROP VIEW IF EXISTS %s", view.getName())));
+        });
+    }
 }

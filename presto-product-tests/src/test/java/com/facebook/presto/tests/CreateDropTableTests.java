@@ -19,17 +19,17 @@ import com.teradata.tempto.ProductTest;
 import com.teradata.tempto.Requires;
 import org.testng.annotations.Test;
 
-import static com.facebook.presto.tests.TestGroups.CREATE_TABLE;
+import static com.facebook.presto.tests.TestGroups.CREATE_DROP_TABLE;
 import static com.facebook.presto.tests.utils.PrestoDDLUtils.createPrestoTable;
 import static com.teradata.tempto.assertions.QueryAssert.assertThat;
 import static com.teradata.tempto.query.QueryExecutor.query;
 import static java.lang.String.format;
 
 @Requires(ImmutableNationTable.class)
-public class CreateTableTests
+public class CreateDropTableTests
         extends ProductTest
 {
-    @Test(groups = CREATE_TABLE)
+    @Test(groups = CREATE_DROP_TABLE)
     public void shouldCreateTableAsSelect()
             throws Exception
     {
@@ -39,7 +39,7 @@ public class CreateTableTests
         }
     }
 
-    @Test(groups = CREATE_TABLE)
+    @Test(groups = CREATE_DROP_TABLE)
     public void shouldCreateTableAsEmptySelect()
             throws Exception
     {
@@ -47,5 +47,36 @@ public class CreateTableTests
         try (Table table = createPrestoTable(tableName, "CREATE TABLE %s AS SELECT * FROM nation WHERE 0 is NULL")) {
             assertThat(query(format("SELECT * FROM %s", table.getNameInDatabase()))).hasRowsCount(0);
         }
+    }
+
+    @Test(groups = CREATE_DROP_TABLE)
+    public void shouldCreateTable()
+            throws Exception
+    {
+        String tableName = "create_table_nation";
+        try (Table table = createPrestoTable(tableName, "CREATE TABLE %s " +
+                "(n_nationkey BIGINT, n_name VARCHAR, n_regionkey BIGINT, n_comment VARCHAR )")) {
+            query(format("INSERT INTO %s SELECT * FROM nation", table.getNameInDatabase()));
+            assertThat(query(format("SELECT * FROM %s", table.getNameInDatabase()))).hasRowsCount(25);
+        }
+    }
+
+    @Test(groups = CREATE_DROP_TABLE)
+    public void shouldCreateTableIfNotExists()
+            throws Exception
+    {
+        String tableName = "nation";
+        Table table = createPrestoTable(tableName, "CREATE TABLE IF NOT EXISTS %s (n_nationkey BIGINT, n_name VARCHAR, n_regionkey BIGINT, n_comment VARCHAR )");
+        assertThat(query(format("SELECT * FROM %s", table.getNameInDatabase()))).hasRowsCount(25);
+    }
+
+    @Test(groups = CREATE_DROP_TABLE)
+    public void shouldDropTableIfNotExists()
+            throws Exception
+    {
+        String tableName = "drop_table_nation";
+        Table table = createPrestoTable(tableName, "CREATE TABLE %s (n_nationkey BIGINT, n_name VARCHAR, n_regionkey BIGINT, n_comment VARCHAR )");
+        table.executeDropTable();
+        query(format("DROP TABLE IF EXISTS %s", table.getNameInDatabase()));
     }
 }

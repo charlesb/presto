@@ -77,7 +77,7 @@ public final class PrestoDDLUtils
             onPrestoWith(sessionProperties).executeQuery(createTableSQL);
         }
 
-        private void executeDropTable()
+        public void executeDropTable()
         {
             String dropTableSQL = format("DROP TABLE %s", tableName);
             onPresto().executeQuery(dropTableSQL);
