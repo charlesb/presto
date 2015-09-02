@@ -191,6 +191,18 @@ public class TestInterpretedFilterFunction
         }
     }
 
+    @Test
+    public void testIsDistinctFromExpressionWithNulls()
+    {
+        assertFilter("NULL IS DISTINCT FROM NULL", false);
+
+        assertFilter("42 IS DISTINCT FROM NULL", true);
+        assertFilter("NULL IS DISTINCT FROM 42", true);
+
+        assertFilter("11.1 IS DISTINCT FROM NULL", true);
+        assertFilter("NULL IS DISTINCT FROM 11.1", true);
+    }
+
     public static void assertFilter(String expression, boolean expectedValue)
     {
         Expression parsed = createExpression(expression, METADATA, ImmutableMap.<Symbol, Type>of());
