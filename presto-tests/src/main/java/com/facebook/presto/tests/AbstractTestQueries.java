@@ -2919,6 +2919,13 @@ public abstract class AbstractTestQueries
     }
 
     @Test
+    public void testConcatOperatorMultipleArguments()
+            throws Exception
+    {
+        assertQuery("SELECT concat('12','34','56','78','9')", "SELECT '123456789'");
+    }
+
+    @Test
     public void testQuotedIdentifiers()
             throws Exception
     {
