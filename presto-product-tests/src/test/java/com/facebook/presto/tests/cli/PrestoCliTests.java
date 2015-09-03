@@ -14,6 +14,7 @@
 package com.facebook.presto.tests.cli;
 
 import com.facebook.presto.cli.Presto;
+import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.io.Files;
 import com.google.inject.Inject;
@@ -32,6 +33,7 @@ import java.util.List;
 
 import static com.facebook.presto.tests.TestGroups.CLI;
 import static com.google.common.base.MoreObjects.firstNonNull;
+import static com.google.common.collect.Lists.newArrayList;
 import static com.google.common.io.Resources.getResource;
 import static com.google.common.io.Resources.readLines;
 import static com.teradata.tempto.fulfillment.table.hive.tpch.TpchTableDefinitions.NATION;
@@ -50,7 +52,6 @@ public class PrestoCliTests
 
     private final List<String> nationTableInteractiveLines;
     private final List<String> nationTableBatchLines;
-    private final List<String> showSessionLines;
 
     @Inject
     @Named("databases.presto.server_address")
@@ -63,7 +64,6 @@ public class PrestoCliTests
     {
         nationTableInteractiveLines = readLines(getResource("com/facebook/presto/tests/cli/interactive_query.results"), UTF_8);
         nationTableBatchLines = readLines(getResource("com/facebook/presto/tests/cli/batch_query.results"), UTF_8);
-        showSessionLines = readLines(getResource("com/facebook/presto/tests/cli/show_session.results"), UTF_8);
     }
 
     @AfterTestWithContext
@@ -107,10 +107,26 @@ public class PrestoCliTests
     {
         launchPrestoCliWithServerArgument();
         presto.waitForPrompt();
-        presto.getProcessInput().println("SET SESSION distributed_join = true;"); // change distributed_join to true (default: false)
-        assertThat(trimLines(presto.readLinesUntilPrompt())).containsExactly("SET SESSION distributed_join = true;", "SET SESSION");
+        // presto:default> SET SESSION distributed_join = false;
+        // SET SESSION
+        presto.getProcessInput().println("SET SESSION distributed_join = false;"); // change distributed_join to false (default: true)
+        assertThat(trimLines(presto.readLinesUntilPrompt())).containsExactly("SET SESSION distributed_join = false;", "SET SESSION");
+
+        // presto:default> SHOW SESSION
+        //              Name              | Value | Default |  Type   |                  Description
+        // -------------------------------+-------+---------+---------+----------------------------------------------------
+        //  distributed_join              | false | true    | boolean | Use a distributed join instead of a broadcast join
         presto.getProcessInput().println("SHOW SESSION;");
-        assertThat(trimLines(presto.readLinesUntilPrompt())).containsAll(showSessionLines);
+        List<String> distributedJoinColumnValues = presto.readLinesUntilPrompt().stream()
+                .filter(line -> line.contains("distributed_join"))
+                .findFirst()
+                .map(distributedJoinLine -> newArrayList(Splitter.on("|").trimResults().split(distributedJoinLine)))
+                .get();
+        assertThat(distributedJoinColumnValues.get(0)).isEqualTo("distributed_join");
+        assertThat(distributedJoinColumnValues.get(1)).isEqualTo("false");
+        // assertThat(columnValues.get(2)).isEqualTo("false"); // defaults can change in next version
+        assertThat(distributedJoinColumnValues.get(3)).isEqualTo("boolean");
+        // assertThat(columnValues.get(4)).isEqualTo("Use a distributed join instead of a broadcast join"); // description can change in next versions
     }
 
     @Test(groups = CLI, timeOut = TIMEOUT)
