@@ -27,7 +27,6 @@ import java.sql.SQLException;
 
 import static com.facebook.presto.tests.TestGroups.HIVE_CONNECTOR;
 import static com.facebook.presto.tests.TestGroups.HIVE_CONNECTOR_014;
-import static com.facebook.presto.tests.TestGroups.QUARANTINE;
 import static com.facebook.presto.tests.TestGroups.SMOKE;
 import static com.facebook.presto.tests.hive.AllSimpleTypesTableDefinitions.ALL_HIVE_SIMPLE_TYPES_ORC;
 import static com.facebook.presto.tests.hive.AllSimpleTypesTableDefinitions.ALL_HIVE_SIMPLE_TYPES_PARQUET;
@@ -176,7 +175,7 @@ public class TestAllDatatypesFromHiveConnector
     }
 
     @Requires(ParquetRequirements.class)
-    @Test(groups = {HIVE_CONNECTOR, HIVE_CONNECTOR_014, QUARANTINE})
+    @Test(groups = {HIVE_CONNECTOR, HIVE_CONNECTOR_014})
     public void testSelectAllDatatypesParquetFile()
             throws SQLException
     {
@@ -208,11 +207,11 @@ public class TestAllDatatypesFromHiveConnector
                         2147483647,
                         9223372036854775807L,
                         123.34500122070312, // (double) 123.345f - see limitation #1
-                        parseTimestampInUTC("2015-05-10 12:15:35.123"),
                         234.567,
+                        parseTimestampInUTC("2015-05-10 12:15:35.123"),
                         "ala ma kota",
                         "ala ma kot",
-                        "ala ma    ",
+                        "ala ma", // CHAR not padded to 10 characters - see limitation #2
                         true));
     }
     // presto limitations referenced above:
@@ -221,4 +220,5 @@ public class TestAllDatatypesFromHiveConnector
     //    As a result it is processed internally and exposed to the user as java double instead java float,
     //    which have different string representation from what is in hive data file.
     //    For 123.345 we get 123.34500122070312
+    // #2 padding of CHAR in parquet does not work as expected
 }
