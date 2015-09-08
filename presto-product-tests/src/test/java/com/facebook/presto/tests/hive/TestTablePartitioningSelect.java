@@ -98,10 +98,27 @@ public class TestTablePartitioningSelect
         assertThat(allPartitionsQueryResult).containsOnly(row(42, 1), row(42, 2));
         assertProcessedLinesCountEquals(selectFromAllPartitionsSql, allPartitionsQueryResult, 2);
 
-        String selectFromOnePartitionsSql = "SELECT * FROM " + tableNameInDatabase + " WHERE part_col = 2";
-        QueryResult onePartitionQueryResult = query(selectFromOnePartitionsSql);
+        String selectFromOnePartitionSql = "SELECT * FROM " + tableNameInDatabase + " WHERE part_col = 2";
+        QueryResult onePartitionQueryResult = query(selectFromOnePartitionSql);
         assertThat(onePartitionQueryResult).containsOnly(row(42, 2));
-        assertProcessedLinesCountEquals(selectFromOnePartitionsSql, onePartitionQueryResult, 1);
+        assertProcessedLinesCountEquals(selectFromOnePartitionSql, onePartitionQueryResult, 1);
+    }
+
+    @Test(groups = HIVE_CONNECTOR)
+    public void testUnionPartitionedHiveTableDifferentFormats()
+            throws SQLException
+    {
+        String tableNameInDatabase = tablesState.get(TABLE_NAME).getNameInDatabase();
+
+        String selectFromAllPartitionsSql = "SELECT * FROM " + tableNameInDatabase + " UNION ALL SELECT * FROM " + tableNameInDatabase;
+        QueryResult allPartitionsQueryResult = query(selectFromAllPartitionsSql);
+        assertThat(allPartitionsQueryResult).containsOnly(row(42, 1), row(42, 2), row(42, 1), row(42, 2));
+        assertProcessedLinesCountEquals(selectFromAllPartitionsSql, allPartitionsQueryResult, 4);
+
+        String selectFromOnePartitionSql = "SELECT * FROM " + tableNameInDatabase + " WHERE part_col = 2 UNION ALL SELECT * FROM " + tableNameInDatabase;
+        QueryResult onePartitionQueryResult = query(selectFromOnePartitionSql);
+        assertThat(onePartitionQueryResult).containsOnly(row(42, 2), row(42, 1), row(42, 2));
+        assertProcessedLinesCountEquals(selectFromOnePartitionSql, onePartitionQueryResult, 3);
     }
 
     private static final long GET_PROCESSED_LINES_COUNT_RETRY_SLEEP = 500;
