@@ -1,5 +1,5 @@
 -- type: hive
-CREATE TABLE %NAME% (
+CREATE EXTERNAL TABLE %NAME% (
   c1 INT,
   c2 VARCHAR(255)
 )
