@@ -66,6 +66,7 @@ import javax.inject.Inject;
 import java.io.Closeable;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -113,6 +114,7 @@ import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Strings.isNullOrEmpty;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.Iterables.concat;
@@ -855,6 +857,30 @@ public class HiveMetadata
             partitionCommitter.close();
             for (CompletableFuture<?> fileRenameFuture : fileRenameFutures) {
                 MoreFutures.getFutureValue(fileRenameFuture, PrestoException.class);
+            }
+
+            if (handle.getWritePath().isPresent()) {
+                // clean remaining partition directories
+                String insertWritePath = handle.getWritePath().get();
+                partitionUpdates.stream()
+                        .map(PartitionUpdate::getWritePath)
+                        .distinct()
+                        .forEach(writePath -> {
+                            checkState(writePath.startsWith(insertWritePath), "Partition updated was write stored outside insert write path");
+                            while (!writePath.equals(insertWritePath)) {
+                                if (!deleteIfExists(writePath)) {
+                                    // this is temp data so an error isn't a big problem
+                                    log.debug("Error deleting insert temp data in %s", writePath);
+                                    return;
+                                }
+                                writePath = Paths.get(writePath).getParent().toString();
+                            }
+                        });
+
+                if (!deleteIfExists(insertWritePath)) {
+                    // this is temp data so an error isn't a big problem
+                    log.debug("Error deleting insert temp data in %s", insertWritePath);
+                }
             }
         }
         catch (Throwable t) {
