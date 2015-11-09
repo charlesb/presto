@@ -44,20 +44,22 @@ import static org.testng.Assert.assertEquals;
 public class TableWriterOperatorTest
 {
     private static final String CONNECTOR_ID = "testConnectorId";
-    private final PageSinkManager pageSinkProvider = new PageSinkManager();
-    private final BlockingPageSink blockingPageSink = new BlockingPageSink();
+    private PageSinkManager pageSinkProvider;
+    private BlockingPageSink blockingPageSink;
     private DriverContext driverContext;
 
     @BeforeMethod
     public void setUp()
             throws Exception
     {
+        pageSinkProvider = new PageSinkManager();
+        blockingPageSink = new BlockingPageSink();
         ExecutorService executor = newCachedThreadPool(daemonThreadsNamed("test-%s"));
         driverContext = createTaskContext(executor, TEST_SESSION)
                 .addPipelineContext(true, true)
                 .addDriverContext();
 
-        pageSinkProvider.addConnectorPageSinkProvider(CONNECTOR_ID, new BlockingConnectorPageSinkProvider(blockingPageSink));
+        pageSinkProvider.addConnectorPageSinkProvider(CONNECTOR_ID, new ConstantPageSinkProvider(blockingPageSink));
     }
 
     @Test
@@ -74,22 +76,32 @@ public class TableWriterOperatorTest
 
         Operator operator = factory.createOperator(driverContext);
 
+        // initial state validation
+        assertEquals(operator.isBlocked().isDone(), true);
         assertEquals(operator.isFinished(), false);
         assertEquals(operator.needsInput(), true);
 
+        // blockingPageSink that will return blocked future
         operator.addInput(rowPagesBuilder(BIGINT).row(1).build().get(0));
 
         assertEquals(operator.isBlocked().isDone(), false);
         assertEquals(operator.isFinished(), false);
         assertEquals(operator.needsInput(), false);
+
+        // complete previously blocked future
+        blockingPageSink.complete();
+
+        assertEquals(operator.isBlocked().isDone(), true);
+        assertEquals(operator.isFinished(), false);
+        assertEquals(operator.needsInput(), true);
     }
 
-    private static class BlockingConnectorPageSinkProvider
+    private static class ConstantPageSinkProvider
             implements ConnectorPageSinkProvider
     {
         private final ConnectorPageSink pageSink;
 
-        private BlockingConnectorPageSinkProvider(ConnectorPageSink pageSink)
+        private ConstantPageSinkProvider(ConnectorPageSink pageSink)
         {
             this.pageSink = pageSink;
         }
@@ -110,10 +122,12 @@ public class TableWriterOperatorTest
     private class BlockingPageSink
             implements ConnectorPageSink
     {
+        private final CompletableFuture<?> future = new CompletableFuture<>();
+
         @Override
         public CompletableFuture<?> appendPage(Page page, Block sampleWeightBlock)
         {
-            return new CompletableFuture<>();
+            return future;
         }
 
         @Override
@@ -125,6 +139,11 @@ public class TableWriterOperatorTest
         @Override
         public void rollback()
         {
+        }
+
+        public void complete()
+        {
+            future.complete(null);
         }
     }
 }

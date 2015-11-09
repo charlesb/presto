@@ -23,6 +23,11 @@ public interface ConnectorPageSink
 {
     CompletableFuture<?> NOT_BLOCKED = CompletableFuture.completedFuture(null);
 
+    /**
+     * Returns a future that will be completed when the page sink can accept
+     * more pages.  If the page sink can accept more pages immediately,
+     * this method should return {@code NOT_BLOCKED}.
+     */
     CompletableFuture<?> appendPage(Page page, Block sampleWeightBlock);
 
     Collection<Slice> commit();
