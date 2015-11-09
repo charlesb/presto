@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.jdbc;
 
+import com.facebook.presto.plugin.blackhole.BlackHolePlugin;
 import com.facebook.presto.server.testing.TestingPrestoServer;
 import com.facebook.presto.tpch.TpchMetadata;
 import com.facebook.presto.tpch.TpchPlugin;
@@ -37,14 +38,22 @@ import java.sql.Time;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static io.airlift.testing.Assertions.assertInstanceOf;
 import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Arrays.asList;
+import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.Executors.newCachedThreadPool;
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.stream.Collectors.toList;
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertFalse;
@@ -60,6 +69,7 @@ public class TestDriver
     private static final String TEST_CATALOG = "test_catalog";
 
     private TestingPrestoServer server;
+    private ExecutorService executorService;
 
     @BeforeClass
     public void setup()
@@ -69,12 +79,19 @@ public class TestDriver
         server = new TestingPrestoServer();
         server.installPlugin(new TpchPlugin());
         server.createCatalog(TEST_CATALOG, "tpch");
+        server.installPlugin(new BlackHolePlugin());
+        server.createCatalog("blackhole", "blackhole");
+
+        executorService = newCachedThreadPool();
     }
 
     @AfterClass
     public void teardown()
+            throws Exception
     {
         closeQuietly(server);
+        executorService.shutdownNow();
+        executorService.awaitTermination(1, MINUTES);
     }
 
     @Test
@@ -242,7 +259,7 @@ public class TestDriver
     {
         try (Connection connection = createConnection()) {
             try (ResultSet rs = connection.getMetaData().getCatalogs()) {
-                assertEquals(readRows(rs), list(list("system"), list(TEST_CATALOG)));
+                assertEquals(readRows(rs), list(list("blackhole"), list("system"), list(TEST_CATALOG)));
 
                 ResultSetMetaData metadata = rs.getMetaData();
                 assertEquals(metadata.getColumnCount(), 1);
@@ -265,6 +282,10 @@ public class TestDriver
     public void testGetSchemas()
             throws Exception
     {
+        List<List<String>> blackhole = new ArrayList<>();
+        blackhole.add(list("blackhole", "information_schema"));
+        blackhole.add(list("blackhole", "default"));
+
         List<List<String>> system = new ArrayList<>();
         system.add(list("system", "information_schema"));
         system.add(list("system", "jdbc"));
@@ -278,6 +299,7 @@ public class TestDriver
         }
 
         List<List<String>> all = new ArrayList<>();
+        all.addAll(blackhole);
         all.addAll(system);
         all.addAll(test);
 
@@ -305,6 +327,7 @@ public class TestDriver
 
             try (ResultSet rs = connection.getMetaData().getSchemas(null, "information_schema")) {
                 assertGetSchemasResult(rs, list(
+                        list("blackhole", "information_schema"),
                         list(TEST_CATALOG, "information_schema"),
                         list("system", "information_schema")));
             }
@@ -597,6 +620,9 @@ public class TestDriver
             try (ResultSet rs = connection.getMetaData().getColumns(null, null, "tables", "table_name")) {
                 assertColumnMetadata(rs);
                 assertTrue(rs.next());
+                assertEquals(rs.getString("TABLE_CAT"), "blackhole");
+                assertEquals(rs.getString("TABLE_SCHEM"), "information_schema");
+                assertTrue(rs.next());
                 assertEquals(rs.getString("TABLE_CAT"), "system");
                 assertEquals(rs.getString("TABLE_SCHEM"), "information_schema");
                 assertEquals(rs.getString("TABLE_NAME"), "tables");
@@ -622,7 +648,7 @@ public class TestDriver
         try (Connection connection = createConnection()) {
             try (ResultSet rs = connection.getMetaData().getColumns(null, "information_schema", "tables", "table_name")) {
                 assertColumnMetadata(rs);
-                assertEquals(readRows(rs).size(), 2);
+                assertEquals(readRows(rs).size(), 3);
             }
         }
 
@@ -1066,6 +1092,90 @@ public class TestDriver
         String url = format("jdbc:presto://%s/a//", server.getAddress());
         try (Connection ignored = DriverManager.getConnection(url, "test", null)) {
             fail("expected exception");
+        }
+    }
+
+    @Test(timeOut = 70000)
+    public void testQueryCancellation()
+            throws Exception
+    {
+        try (Connection connection = createConnection("blackhole", "blackhole")) {
+            executeUpdate(connection,
+                    "CREATE TABLE test_cancellation (key BIGINT) " +
+                            "WITH (" +
+                            "   split_count = 1, " +
+                            "   pages_per_split = 1, " +
+                            "   rows_per_page = 1, " +
+                            "   page_processing_delay = '1m'" +
+                            ")");
+        }
+
+        CountDownLatch queryStarted = new CountDownLatch(1);
+        CountDownLatch queryFinished = new CountDownLatch(1);
+        AtomicReference<String> queryId = new AtomicReference<>();
+        AtomicReference<Throwable> queryFailure = new AtomicReference<>();
+
+        Future<Void> queryFuture = executorService.submit(() -> {
+            try (Connection connection = createConnection("blackhole", "default")) {
+                try (Statement statement = connection.createStatement()) {
+                    try (ResultSet resultSet = statement.executeQuery("SELECT * FROM test_cancellation")) {
+                        queryId.set(resultSet.unwrap(PrestoResultSet.class).getQueryId());
+                        queryStarted.countDown();
+                        try {
+                            resultSet.next();
+                        }
+                        catch (Throwable t) {
+                            queryFailure.set(t);
+                        }
+                        finally {
+                            queryFinished.countDown();
+                        }
+                    }
+                }
+            }
+            return null;
+        });
+
+        queryStarted.await(1, MINUTES);
+        assertNotNull(queryId.get());
+        assertQueryState(queryId.get(), "QUEUED", "PLANNING", "STARTING", "RUNNING");
+        queryFuture.cancel(true);
+        queryFinished.await(1, MINUTES);
+        assertNotNull(queryFailure.get());
+        assertQueryState(queryId.get(), "FAILED");
+    }
+
+    private void assertQueryState(String queryId, String... states)
+            throws SQLException
+    {
+        String queryState = getQueryState(queryId);
+        assertTrue(Arrays.asList(states).contains(queryState));
+    }
+
+    private String getQueryState(String queryId)
+            throws SQLException
+    {
+        String sql = format("select state from system.runtime.queries where query_id='%s'", queryId);
+        try (Connection connection = createConnection()) {
+            try (Statement statement = connection.createStatement()) {
+                try (ResultSet resultSet = statement.executeQuery(sql)) {
+                    assertTrue(resultSet.next(), "Query was not found");
+                    return requireNonNull(resultSet.getString(1));
+                }
+            }
+        }
+    }
+
+    private void executeUpdate(Connection connection, String sql)
+            throws SQLException
+    {
+        try (Statement statement = connection.createStatement()) {
+            try (ResultSet resultSet = statement.executeQuery(sql)) {
+                //noinspection StatementWithEmptyBody
+                while (resultSet.next()) {
+                    // just to make sure that query is finished
+                }
+            }
         }
     }
 
