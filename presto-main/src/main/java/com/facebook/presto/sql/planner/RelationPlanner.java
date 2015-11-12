@@ -21,6 +21,7 @@ import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.predicate.TupleDomain;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.ExpressionUtils;
+import com.facebook.presto.sql.JoinExpressionUtils;
 import com.facebook.presto.sql.analyzer.Analysis;
 import com.facebook.presto.sql.analyzer.Field;
 import com.facebook.presto.sql.analyzer.FieldOrExpression;
@@ -48,7 +49,9 @@ import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.InPredicate;
 import com.facebook.presto.sql.tree.Join;
+import com.facebook.presto.sql.tree.LikePredicate;
 import com.facebook.presto.sql.tree.LongLiteral;
+import com.facebook.presto.sql.tree.NotExpression;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.QualifiedNameReference;
 import com.facebook.presto.sql.tree.Query;
@@ -79,10 +82,11 @@ import java.util.Set;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
-import static com.facebook.presto.sql.ExpressionUtils.flipComparison;
+import static com.facebook.presto.sql.JoinExpressionUtils.getLeftExpressionFromJoinConjunct;
+import static com.facebook.presto.sql.JoinExpressionUtils.getRightExpressionFromJoinConjunct;
+import static com.facebook.presto.sql.JoinExpressionUtils.isSupportedJoinConjunct;
 import static com.facebook.presto.sql.analyzer.SemanticErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.sql.planner.ExpressionInterpreter.evaluateConstantExpression;
-import static com.facebook.presto.sql.tree.ComparisonExpression.Type.EQUAL;
 import static com.facebook.presto.sql.tree.Join.Type.INNER;
 import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.facebook.presto.util.Types.checkType;
@@ -184,6 +188,103 @@ class RelationPlanner
         return new RelationPlan(planNode, outputDescriptor, subPlan.getOutputSymbols(), Optional.ofNullable(sampleWeightSymbol));
     }
 
+    private enum JoinComparisonType
+    {
+        EQUAL(Optional.of(ComparisonExpression.Type.EQUAL)),
+        NOT_EQUAL(Optional.of(ComparisonExpression.Type.NOT_EQUAL)),
+        LESS_THAN(Optional.of(ComparisonExpression.Type.LESS_THAN)),
+        LESS_THAN_OR_EQUAL(Optional.of(ComparisonExpression.Type.LESS_THAN_OR_EQUAL)),
+        GREATER_THAN(Optional.of(ComparisonExpression.Type.GREATER_THAN)),
+        GREATER_THAN_OR_EQUAL(Optional.of(ComparisonExpression.Type.GREATER_THAN_OR_EQUAL)),
+        IS_DISTINCT_FROM(Optional.of(ComparisonExpression.Type.IS_DISTINCT_FROM)),
+        LIKE,
+        NOT_LIKE,
+        LIKE_FLIPPED,
+        NOT_LIKE_FLIPPED;
+
+        private final Optional<ComparisonExpression.Type> comparisonExpressionType;
+
+        private JoinComparisonType()
+        {
+            this(Optional.empty());
+        }
+
+        private JoinComparisonType(Optional<ComparisonExpression.Type> comparisonExpressionType)
+        {
+            this.comparisonExpressionType = comparisonExpressionType;
+        }
+
+        public JoinComparisonType flip()
+        {
+            switch (this) {
+                case EQUAL:
+                case NOT_EQUAL:
+                case IS_DISTINCT_FROM:
+                    return this;
+                case LESS_THAN:
+                    return GREATER_THAN;
+                case LESS_THAN_OR_EQUAL:
+                    return GREATER_THAN_OR_EQUAL;
+                case GREATER_THAN:
+                    return LESS_THAN;
+                case GREATER_THAN_OR_EQUAL:
+                    return LESS_THAN_OR_EQUAL;
+                case LIKE:
+                    return LIKE_FLIPPED;
+                case NOT_LIKE:
+                    return NOT_LIKE_FLIPPED;
+                case LIKE_FLIPPED:
+                    return LIKE;
+                case NOT_LIKE_FLIPPED:
+                    return NOT_LIKE;
+                default:
+                    throw new IllegalArgumentException("Unsupported comparison: " + this);
+            }
+        }
+
+        public static JoinComparisonType fromJoinConjunct(Expression conjunct)
+        {
+            if (conjunct instanceof ComparisonExpression) {
+                ComparisonExpression.Type comparisonType = ((ComparisonExpression) conjunct).getType();
+                for (JoinComparisonType joinComparisonType : JoinComparisonType.values()) {
+                    if (joinComparisonType.comparisonExpressionType.isPresent() && joinComparisonType.comparisonExpressionType.get() == comparisonType) {
+                        return joinComparisonType;
+                    }
+                }
+                throw new IllegalArgumentException("Unsupported comparison type: " + comparisonType);
+            }
+            else if (conjunct instanceof LikePredicate) {
+                return LIKE;
+            }
+            else if (conjunct instanceof NotExpression && ((NotExpression) conjunct).getValue() instanceof LikePredicate) {
+                return NOT_LIKE;
+            }
+            else {
+                throw new IllegalArgumentException("Unsupported join conjunct: " + conjunct);
+            }
+        }
+
+        public Expression toJoinConjunct(Expression leftExpression, Expression rightExpression, Optional<Expression> likeEscape)
+        {
+            if (comparisonExpressionType.isPresent()) {
+                return new ComparisonExpression(comparisonExpressionType.get(), leftExpression, rightExpression);
+            }
+            else {
+                switch (this) {
+                    case LIKE:
+                        return new LikePredicate(leftExpression, rightExpression, likeEscape.orElse(null));
+                    case LIKE_FLIPPED:
+                        return new LikePredicate(rightExpression, leftExpression, likeEscape.orElse(null));
+                    case NOT_LIKE:
+                        return new NotExpression(new LikePredicate(leftExpression, rightExpression, likeEscape.orElse(null)));
+                    case NOT_LIKE_FLIPPED:
+                        return new NotExpression(new LikePredicate(rightExpression, leftExpression, likeEscape.orElse(null)));
+                }
+                throw new IllegalArgumentException("Unsupported conjunct type: " + this);
+            }
+        }
+    }
+
     @Override
     protected RelationPlan visitJoin(Join node, Void context)
     {
@@ -227,31 +328,34 @@ class RelationPlanner
             RelationType right = analysis.getOutputDescriptor(node.getRight());
             List<Expression> leftExpressions = new ArrayList<>();
             List<Expression> rightExpressions = new ArrayList<>();
-            List<ComparisonExpression.Type> comparisonTypes = new ArrayList<>();
+            List<JoinComparisonType> comparisonTypes = new ArrayList<>();
+            List<Optional<Expression>> likeEscapes = new ArrayList<>();
             for (Expression conjunct : ExpressionUtils.extractConjuncts(criteria)) {
                 conjunct = ExpressionUtils.normalize(conjunct);
-                if (!(conjunct instanceof ComparisonExpression)) {
+                if (!isSupportedJoinConjunct(conjunct)) {
                     throw new SemanticException(NOT_SUPPORTED, node, "Unsupported non-equi join form: %s", conjunct);
                 }
 
-                ComparisonExpression comparison = (ComparisonExpression) conjunct;
-                ComparisonExpression.Type comparisonType = comparison.getType();
-                if (comparison.getType() != EQUAL && node.getType() != INNER) {
+                JoinComparisonType comparisonType = JoinComparisonType.fromJoinConjunct(conjunct);
+                if (comparisonType != JoinComparisonType.EQUAL && node.getType() != INNER) {
                     throw new SemanticException(NOT_SUPPORTED, node, "Non-equi joins only supported for inner join: %s", conjunct);
                 }
-                Set<QualifiedName> firstDependencies = DependencyExtractor.extractNames(comparison.getLeft(), analysis.getColumnReferences());
-                Set<QualifiedName> secondDependencies = DependencyExtractor.extractNames(comparison.getRight(), analysis.getColumnReferences());
+                Expression firstExpression = getLeftExpressionFromJoinConjunct(conjunct);
+                Expression secondExpression = getRightExpressionFromJoinConjunct(conjunct);
+                Optional<Expression> likeEscape = JoinExpressionUtils.getLikeEscapeFromJoinConjunct(conjunct);
+                Set<QualifiedName> firstDependencies = DependencyExtractor.extractNames(firstExpression, analysis.getColumnReferences());
+                Set<QualifiedName> secondDependencies = DependencyExtractor.extractNames(secondExpression, analysis.getColumnReferences());
 
                 Expression leftExpression;
                 Expression rightExpression;
                 if (firstDependencies.stream().allMatch(left.canResolvePredicate()) && secondDependencies.stream().allMatch(right.canResolvePredicate())) {
-                    leftExpression = comparison.getLeft();
-                    rightExpression = comparison.getRight();
+                    leftExpression = firstExpression;
+                    rightExpression = secondExpression;
                 }
                 else if (firstDependencies.stream().allMatch(right.canResolvePredicate()) && secondDependencies.stream().allMatch(left.canResolvePredicate())) {
-                    leftExpression = comparison.getRight();
-                    rightExpression = comparison.getLeft();
-                    comparisonType = flipComparison(comparisonType);
+                    leftExpression = secondExpression;
+                    rightExpression = firstExpression;
+                    comparisonType = comparisonType.flip();
                 }
                 else {
                     // must have a complex expression that involves both tuples on one side of the comparison expression (e.g., coalesce(left.x, right.x) = 1)
@@ -260,30 +364,34 @@ class RelationPlanner
                 leftExpressions.add(leftExpression);
                 rightExpressions.add(rightExpression);
                 comparisonTypes.add(comparisonType);
+                likeEscapes.add(likeEscape);
             }
 
             Analysis.JoinInPredicates joinInPredicates = analysis.getJoinInPredicates(node);
 
             // Add semi joins if necessary
-            leftPlanBuilder = appendSemiJoins(leftPlanBuilder, joinInPredicates.getLeftInPredicates());
-            rightPlanBuilder = appendSemiJoins(rightPlanBuilder, joinInPredicates.getRightInPredicates());
+            if (joinInPredicates != null) {
+                leftPlanBuilder = appendSemiJoins(leftPlanBuilder, joinInPredicates.getLeftInPredicates());
+                rightPlanBuilder = appendSemiJoins(rightPlanBuilder, joinInPredicates.getRightInPredicates());
+            }
 
             // Add projections for join criteria
             leftPlanBuilder = appendProjections(leftPlanBuilder, leftExpressions);
             rightPlanBuilder = appendProjections(rightPlanBuilder, rightExpressions);
 
             List<Expression> postInnerJoinComparisons = new ArrayList<>();
-            for (int i = 0; i < comparisonTypes.size(); i++) {
+            for (int i = 0; i < leftExpressions.size(); i++) {
                 Symbol leftSymbol = leftPlanBuilder.translate(leftExpressions.get(i));
                 Symbol rightSymbol = rightPlanBuilder.translate(rightExpressions.get(i));
 
-                if (comparisonTypes.get(i) == ComparisonExpression.Type.EQUAL) {
+                if (comparisonTypes.get(i) == JoinComparisonType.EQUAL) {
                     equiClauses.add(new JoinNode.EquiJoinClause(leftSymbol, rightSymbol));
                 }
 
                 Expression leftExpression = leftPlanBuilder.rewrite(leftExpressions.get(i));
                 Expression rightExpression = rightPlanBuilder.rewrite(rightExpressions.get(i));
-                postInnerJoinComparisons.add(new ComparisonExpression(comparisonTypes.get(i), leftExpression, rightExpression));
+                Optional<Expression> likeEscape = likeEscapes.get(i);
+                postInnerJoinComparisons.add(comparisonTypes.get(i).toJoinConjunct(leftExpression, rightExpression, likeEscape));
             }
             postInnerJoinCriteria = ExpressionUtils.and(postInnerJoinComparisons);
         }

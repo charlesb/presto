@@ -135,6 +135,9 @@ import static com.facebook.presto.metadata.MetadataUtil.createQualifiedTableName
 import static com.facebook.presto.spi.StandardErrorCode.INVALID_FUNCTION_ARGUMENT;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
+import static com.facebook.presto.sql.JoinExpressionUtils.getLeftExpressionFromJoinConjunct;
+import static com.facebook.presto.sql.JoinExpressionUtils.getRightExpressionFromJoinConjunct;
+import static com.facebook.presto.sql.JoinExpressionUtils.isSupportedJoinConjunct;
 import static com.facebook.presto.sql.QueryUtil.aliased;
 import static com.facebook.presto.sql.QueryUtil.aliasedName;
 import static com.facebook.presto.sql.QueryUtil.aliasedNullToEmpty;
@@ -1102,27 +1105,28 @@ class StatementAnalyzer
 
             for (Expression conjunct : ExpressionUtils.extractConjuncts((Expression) optimizedExpression)) {
                 conjunct = ExpressionUtils.normalize(conjunct);
-                if (!(conjunct instanceof ComparisonExpression)) {
-                    throw new SemanticException(NOT_SUPPORTED, node, "Non-equi joins not supported: %s", conjunct);
+                if (!isSupportedJoinConjunct(conjunct)) {
+                    throw new SemanticException(NOT_SUPPORTED, node, "Unsupported expression in join clause: %s", conjunct);
                 }
 
-                ComparisonExpression comparison = (ComparisonExpression) conjunct;
-                Set<QualifiedName> firstDependencies = DependencyExtractor.extractNames(comparison.getLeft(), analyzer.getColumnReferences());
-                Set<QualifiedName> secondDependencies = DependencyExtractor.extractNames(comparison.getRight(), analyzer.getColumnReferences());
+                Expression conjunctFirst = getLeftExpressionFromJoinConjunct(conjunct);
+                Expression conjunctSecond = getRightExpressionFromJoinConjunct(conjunct);
+                Set<QualifiedName> firstDependencies = DependencyExtractor.extractNames(conjunctFirst, analyzer.getColumnReferences());
+                Set<QualifiedName> secondDependencies = DependencyExtractor.extractNames(conjunctSecond, analyzer.getColumnReferences());
 
                 Expression leftExpression;
                 Expression rightExpression;
                 if (firstDependencies.stream().allMatch(left.canResolvePredicate()) && secondDependencies.stream().allMatch(right.canResolvePredicate())) {
-                    leftExpression = comparison.getLeft();
-                    rightExpression = comparison.getRight();
+                    leftExpression = conjunctFirst;
+                    rightExpression = conjunctSecond;
                 }
                 else if (firstDependencies.stream().allMatch(right.canResolvePredicate()) && secondDependencies.stream().allMatch(left.canResolvePredicate())) {
-                    leftExpression = comparison.getRight();
-                    rightExpression = comparison.getLeft();
+                    leftExpression = conjunctSecond;
+                    rightExpression = conjunctFirst;
                 }
                 else {
                     // must have a complex expression that involves both tuples on one side of the comparison expression (e.g., coalesce(left.x, right.x) = 1)
-                    throw new SemanticException(NOT_SUPPORTED, node, "Non-equi joins not supported: %s", conjunct);
+                    throw new SemanticException(NOT_SUPPORTED, node, "Unsupported expression in join clause: %s", conjunct);
                 }
 
                 // analyze the clauses to record the types of all subexpressions and resolve names against the left/right underlying tuples
