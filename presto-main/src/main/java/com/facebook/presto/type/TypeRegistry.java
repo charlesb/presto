@@ -16,6 +16,7 @@ package com.facebook.presto.type;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
+import com.facebook.presto.spi.type.TypeSignatureParameter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
@@ -115,6 +116,13 @@ public final class TypeRegistry
     }
 
     @Override
+    public Type getParameterizedType(String baseTypeName, List<TypeSignatureParameter> typeParameters)
+    {
+        return getType(new TypeSignature(baseTypeName, typeParameters));
+    }
+
+    @Override
+    @Deprecated
     public Type getParameterizedType(String baseTypeName, List<TypeSignature> typeParameters, List<Object> literalParameters)
     {
         return getType(new TypeSignature(baseTypeName, typeParameters, literalParameters));
@@ -123,7 +131,8 @@ public final class TypeRegistry
     private Type instantiateParametricType(TypeSignature signature)
     {
         ImmutableList.Builder<Type> parameterTypes = ImmutableList.builder();
-        for (TypeSignature parameter : signature.getParameters()) {
+        // TODO: add literals to Types and switch to TypeSignatureParameter
+        for (TypeSignature parameter : signature.getTypeParametersAsTypeSignatures()) {
             Type parameterType = getType(parameter);
             if (parameterType == null) {
                 return null;
