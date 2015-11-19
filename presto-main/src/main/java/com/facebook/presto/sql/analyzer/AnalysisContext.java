@@ -13,13 +13,14 @@
  */
 package com.facebook.presto.sql.analyzer;
 
+import com.facebook.presto.sql.tree.AstVisitor;
 import com.facebook.presto.sql.tree.Query;
 import com.google.common.base.Preconditions;
 
 import java.util.HashMap;
 import java.util.Map;
 
-public class AnalysisContext
+public class AnalysisContext extends AstVisitor.StackableContext
 {
     private final AnalysisContext parent;
     private final Map<String, Query> namedQueries = new HashMap<>();

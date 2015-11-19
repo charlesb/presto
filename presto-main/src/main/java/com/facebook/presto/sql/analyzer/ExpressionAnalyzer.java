@@ -39,7 +39,6 @@ import com.facebook.presto.sql.tree.Cast;
 import com.facebook.presto.sql.tree.CoalesceExpression;
 import com.facebook.presto.sql.tree.ComparisonExpression;
 import com.facebook.presto.sql.tree.CurrentTime;
-import com.facebook.presto.sql.tree.DefaultTraversalVisitor;
 import com.facebook.presto.sql.tree.DereferenceExpression;
 import com.facebook.presto.sql.tree.DoubleLiteral;
 import com.facebook.presto.sql.tree.Expression;
@@ -182,35 +181,8 @@ public class ExpressionAnalyzer
      */
     public Type analyze(Expression expression, RelationType tupleDescriptor, AnalysisContext context)
     {
-        ScalarSubqueryDetector scalarSubqueryDetector = new ScalarSubqueryDetector();
-        expression.accept(scalarSubqueryDetector, null);
-
         Visitor visitor = new Visitor(tupleDescriptor);
-        return expression.accept(visitor, context);
-    }
-
-    private static class ScalarSubqueryDetector
-            extends DefaultTraversalVisitor<Void, Void>
-    {
-        @Override
-        protected Void visitInPredicate(InPredicate node, Void context)
-        {
-            Expression valueList = node.getValueList();
-            if (valueList instanceof SubqueryExpression) {
-                process(node.getValue(), context);
-                super.visitSubqueryExpression((SubqueryExpression) valueList, context);
-            }
-            else {
-                super.visitInPredicate(node, context);
-            }
-            return null;
-        }
-
-        @Override
-        protected Void visitSubqueryExpression(SubqueryExpression node, Void context)
-        {
-            throw new SemanticException(NOT_SUPPORTED, node, "Scalar subqueries not yet supported");
-        }
+        return visitor.process(expression, context);
     }
 
     private class Visitor
@@ -815,7 +787,6 @@ public class ExpressionAnalyzer
             }
             else if (valueList instanceof SubqueryExpression) {
                 coerceToSingleType(context, node, "value and result of subquery must be of the same type for IN expression: %s vs %s", value, valueList);
-                subqueryInPredicates.add(node);
             }
 
             expressionTypes.put(node, BOOLEAN);
@@ -845,8 +816,20 @@ public class ExpressionAnalyzer
                         descriptor.getVisibleFieldCount());
             }
 
-            Type type = Iterables.getOnlyElement(descriptor.getVisibleFields()).getType();
+            Optional<Node> previousNode = context.getPreviousNode();
+            if (previousNode.isPresent() && previousNode.get() instanceof InPredicate) {
+                InPredicate inPredicate = (InPredicate) previousNode.get();
+                if (inPredicate.getValue() == node) {
+                    throw new SemanticException(NOT_SUPPORTED, node, "Scalar subqueries not supported as left side for IN expression.");
+                }
+                subqueryInPredicates.add((InPredicate) previousNode.get());
 
+            }
+            else {
+                throw new SemanticException(NOT_SUPPORTED, node, "Scalar subqueries not yet supported");
+            }
+
+            Type type = Iterables.getOnlyElement(descriptor.getVisibleFields()).getType();
             expressionTypes.put(node, type);
             return type;
         }

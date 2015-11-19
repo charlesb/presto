@@ -15,10 +15,23 @@ package com.facebook.presto.sql.tree;
 
 import javax.annotation.Nullable;
 
+import java.util.LinkedList;
+import java.util.Optional;
+
 public abstract class AstVisitor<R, C>
 {
     public R process(Node node, @Nullable C context)
     {
+        if (context instanceof StackableContext) {
+            StackableContext stackableContext = (StackableContext) context;
+            stackableContext.push(node);
+            try {
+                return node.accept(this, context);
+            }
+            finally {
+                stackableContext.pop();
+            }
+        }
         return node.accept(this, context);
     }
 
@@ -480,5 +493,28 @@ public abstract class AstVisitor<R, C>
     protected R visitDelete(Delete node, C context)
     {
         return visitStatement(node, context);
+    }
+
+    public static class StackableContext
+    {
+        private final LinkedList<Node> stack = new LinkedList<>();
+
+        private void pop()
+        {
+            stack.pop();
+        }
+
+        void push(Node node)
+        {
+            stack.push(node);
+        }
+
+        public Optional<Node> getPreviousNode()
+        {
+            if (stack.size() > 1) {
+                return Optional.of(stack.get(stack.size() - 1));
+            }
+            return Optional.empty();
+        }
     }
 }
