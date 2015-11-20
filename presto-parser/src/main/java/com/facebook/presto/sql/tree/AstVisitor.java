@@ -512,7 +512,7 @@ public abstract class AstVisitor<R, C>
         public Optional<Node> getPreviousNode()
         {
             if (stack.size() > 1) {
-                return Optional.of(stack.get(stack.size() - 1));
+                return Optional.of(stack.get(1));
             }
             return Optional.empty();
         }
