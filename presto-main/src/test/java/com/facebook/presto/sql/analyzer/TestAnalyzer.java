@@ -140,17 +140,18 @@ public class TestAnalyzer
             throws Exception
     {
         assertFails(TYPE_MISMATCH, "SELECT * FROM (VALUES ('a')) t(y) WHERE y IN (VALUES (1))");
+        assertFails(TYPE_MISMATCH, "SELECT (VALUES (true)) IN (VALUES (1))");
     }
 
     @Test
-    public void testScalarSubQueryException()
+    public void testScalarSubQuery()
             throws Exception
     {
         assertFails(NOT_SUPPORTED, "SELECT 'a', (VALUES (1)) GROUP BY 1");
-        assertFails(NOT_SUPPORTED, "SELECT 'a', (SELECT (1))");
-        assertFails(NOT_SUPPORTED, "SELECT * FROM t1 WHERE (VALUES 1) = 2");
-        assertFails(NOT_SUPPORTED, "SELECT * FROM t1 WHERE (VALUES 1) IN (2)");
-        assertFails(NOT_SUPPORTED, "SELECT * FROM t1 WHERE (VALUES 1) IN (VALUES 1)");
+        analyze("SELECT 'a', (SELECT (1))");
+        analyze("SELECT * FROM t1 WHERE (VALUES 1) = 2");
+        analyze("SELECT * FROM t1 WHERE (VALUES 1) IN (VALUES 1)");
+        analyze("SELECT * FROM t1 WHERE (VALUES 1) IN (2)");
         analyze("SELECT * FROM (SELECT 1) t1(x) WHERE x IN (SELECT 1)");
     }
 

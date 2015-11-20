@@ -69,6 +69,7 @@ import static com.facebook.presto.testing.TestingAccessControlManager.TestingPri
 import static com.facebook.presto.testing.TestingAccessControlManager.privilege;
 import static com.facebook.presto.tests.QueryAssertions.assertContains;
 import static com.facebook.presto.tests.QueryAssertions.assertEqualsIgnoreOrder;
+import static com.facebook.presto.tests.QueryAssertions.assertQuery;
 import static com.google.common.collect.Iterables.transform;
 import static io.airlift.tpch.TpchTable.ORDERS;
 import static io.airlift.tpch.TpchTable.tableNameGetter;
@@ -4513,6 +4514,23 @@ public abstract class AbstractTestQueries
                 "FROM (\n" +
                 "  SELECT CASE WHEN orderkey % 4 = 0 THEN NULL ELSE orderkey END AS orderkey\n" +
                 "  FROM orders)");
+    }
+
+    @Test
+    public void testScalarSubquery()
+            throws Exception
+    {
+        assertQuery("SELECT (SELECT (SELECT (SELECT 1)))");
+        assertQuery("SELECT * FROM lineitem WHERE orderkey = (\n" +
+                "SELECT max(orderkey) FROM orders)");
+        assertQuery("SELECT * FROM lineitem WHERE orderkey = (\n" +
+                "SELECT orderkey FROM orders WHERE 0=1)");
+        assertQuery("SELECT (SELECT 1) IN (1)");
+        assertQueryFails("SELECT * FROM lineitem WHERE orderkey = (\n" +
+                "SELECT orderkey FROM orders ORDER BY totalprice)",
+                "Scalar sub-query has returned multiple rows");
+        assertQueryFails("SELECT (VALUES (1), (2)) IN (1,2)",
+                "Scalar sub-query has returned multiple rows");
     }
 
     @Test

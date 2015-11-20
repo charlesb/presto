@@ -51,6 +51,7 @@ import com.facebook.presto.sql.planner.plan.PlanNode;
 import com.facebook.presto.sql.planner.plan.PlanVisitor;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.RowNumberNode;
+import com.facebook.presto.sql.planner.plan.ScalarNode;
 import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.TableCommitNode;
@@ -220,6 +221,20 @@ public class AddExchanges
 
         @Override
         public PlanWithProperties visitOutput(OutputNode node, Context context)
+        {
+            PlanWithProperties child = planChild(node, context.withPreferredProperties(PreferredProperties.any()));
+
+            if (child.getProperties().isDistributed()) {
+                child = withDerivedProperties(
+                        gatheringExchange(idAllocator.getNextId(), child.getNode()),
+                        child.getProperties());
+            }
+
+            return rebaseAndDeriveProperties(node, child);
+        }
+
+        @Override
+        public PlanWithProperties visitScalar(ScalarNode node, Context context)
         {
             PlanWithProperties child = planChild(node, context.withPreferredProperties(PreferredProperties.any()));
 
@@ -720,11 +735,14 @@ public class AddExchanges
         {
             List<Symbol> leftSymbols = Lists.transform(node.getCriteria(), JoinNode.EquiJoinClause::getLeft);
             List<Symbol> rightSymbols = Lists.transform(node.getCriteria(), JoinNode.EquiJoinClause::getRight);
+            JoinNode.Type type = node.getType();
 
             PlanWithProperties left;
             PlanWithProperties right;
 
-            if ((distributedJoins && !(node.getType() == INNER && leftSymbols.isEmpty())) || node.getType() == FULL || node.getType() == RIGHT) {
+            boolean innerJoinWithSymbols = !(type == INNER && leftSymbols.isEmpty());
+            boolean joinWithNonScalar = !node.getRight().accept(new IsScalarPlanVisitor(), null);
+            if ((distributedJoins && innerJoinWithSymbols && joinWithNonScalar) || type == FULL || type == RIGHT) {
                 // The implementation of full outer join only works if the data is hash partitioned. See LookupJoinOperators#buildSideOuterJoinUnvisitedPositions
 
                 left = node.getLeft().accept(this, context.withPreferredProperties(PreferredProperties.hashPartitioned(leftSymbols)));
@@ -768,7 +786,7 @@ public class AddExchanges
             }
 
             JoinNode result = new JoinNode(node.getId(),
-                    node.getType(),
+                    type,
                     left.getNode(),
                     right.getNode(),
                     node.getCriteria(),
@@ -1007,8 +1025,8 @@ public class AddExchanges
         {
             return PropertyDerivations.deriveProperties(result, inputProperties, metadata, session, symbolAllocator.getTypes(), parser);
         }
-    }
 
+    }
     private static Map<Symbol, Symbol> computeIdentityTranslations(Map<Symbol, Expression> assignments)
     {
         Map<Symbol, Symbol> outputToInput = new HashMap<>();
@@ -1100,7 +1118,6 @@ public class AddExchanges
     {
         private final PlanNode node;
         private final ActualProperties properties;
-
         public PlanWithProperties(PlanNode node, ActualProperties properties)
         {
             this.node = node;
@@ -1115,6 +1132,29 @@ public class AddExchanges
         public ActualProperties getProperties()
         {
             return properties;
+        }
+
+    }
+
+    private static final class IsScalarPlanVisitor
+            extends PlanVisitor<Void, Boolean>
+    {
+        @Override
+        protected Boolean visitPlan(PlanNode node, Void context)
+        {
+            return false;
+        }
+
+        @Override
+        public Boolean visitScalar(ScalarNode node, Void context)
+        {
+            return true;
+        }
+
+        @Override
+        public Boolean visitProject(ProjectNode node, Void context)
+        {
+            return node.getSource().accept(this, null);
         }
     }
 }

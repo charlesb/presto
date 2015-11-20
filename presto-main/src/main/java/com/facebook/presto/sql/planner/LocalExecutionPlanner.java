@@ -50,6 +50,7 @@ import com.facebook.presto.operator.ProjectionFunction;
 import com.facebook.presto.operator.ProjectionFunctions;
 import com.facebook.presto.operator.RowNumberOperator;
 import com.facebook.presto.operator.SampleOperator.SampleOperatorFactory;
+import com.facebook.presto.operator.ScalarOperator;
 import com.facebook.presto.operator.ScanFilterAndProjectOperator;
 import com.facebook.presto.operator.SetBuilderOperator.SetBuilderOperatorFactory;
 import com.facebook.presto.operator.SetBuilderOperator.SetSupplier;
@@ -101,6 +102,7 @@ import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.RemoteSourceNode;
 import com.facebook.presto.sql.planner.plan.RowNumberNode;
 import com.facebook.presto.sql.planner.plan.SampleNode;
+import com.facebook.presto.sql.planner.plan.ScalarNode;
 import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.TableCommitNode;
@@ -181,6 +183,7 @@ import static com.google.common.base.Functions.forMap;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.collect.Iterables.concat;
+import static com.google.common.collect.Iterables.getOnlyElement;
 import static java.lang.String.format;
 import static java.util.Collections.singleton;
 import static java.util.Objects.requireNonNull;
@@ -1641,6 +1644,18 @@ public class LocalExecutionPlanner
             context.setInputDriver(false);
 
             return new PhysicalOperation(createRandomDistribution(context.getNextOperatorId(), inMemoryExchange), makeLayout(node));
+        }
+
+        @Override
+        public PhysicalOperation visitScalar(ScalarNode node, LocalExecutionPlanContext context)
+        {
+            PhysicalOperation source = node.getSource().accept(this, context);
+
+            Symbol symbol = getOnlyElement(node.getOutputSymbols());
+            Type type = requireNonNull(context.getTypes().get(symbol), format("No type for symbol %s", symbol));
+
+            OperatorFactory operatorFactory = new ScalarOperator.ScalarOperatorFactory(context.getNextOperatorId(), type);
+            return new PhysicalOperation(operatorFactory, makeLayout(node), source);
         }
 
         @Override

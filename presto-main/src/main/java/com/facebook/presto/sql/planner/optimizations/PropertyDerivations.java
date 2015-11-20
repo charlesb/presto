@@ -44,6 +44,7 @@ import com.facebook.presto.sql.planner.plan.PlanVisitor;
 import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.RowNumberNode;
 import com.facebook.presto.sql.planner.plan.SampleNode;
+import com.facebook.presto.sql.planner.plan.ScalarNode;
 import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.TableCommitNode;
@@ -124,6 +125,12 @@ class PropertyDerivations
 
         @Override
         public ActualProperties visitOutput(OutputNode node, List<ActualProperties> inputProperties)
+        {
+            return Iterables.getOnlyElement(inputProperties);
+        }
+
+        @Override
+        public ActualProperties visitScalar(ScalarNode node, List<ActualProperties> inputProperties)
         {
             return Iterables.getOnlyElement(inputProperties);
         }

@@ -47,6 +47,7 @@ import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.RemoteSourceNode;
 import com.facebook.presto.sql.planner.plan.RowNumberNode;
 import com.facebook.presto.sql.planner.plan.SampleNode;
+import com.facebook.presto.sql.planner.plan.ScalarNode;
 import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.TableCommitNode;
@@ -581,6 +582,14 @@ public class PlanPrinter
         public Void visitMetadataDelete(MetadataDeleteNode node, Integer indent)
         {
             print(indent, "- MetadataDelete[%s] => [%s]", node.getTarget(), formatOutputs(node.getOutputSymbols()));
+
+            return processChildren(node, indent + 1);
+        }
+
+        @Override
+        public Void visitScalar(ScalarNode node, Integer indent)
+        {
+            print(indent, "- Scalar => [%s]", formatOutputs(node.getOutputSymbols()));
 
             return processChildren(node, indent + 1);
         }

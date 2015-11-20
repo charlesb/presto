@@ -154,4 +154,9 @@ public class PlanVisitor<C, R>
     {
         return visitPlan(node, context);
     }
+
+    public R visitScalar(ScalarNode node, C context)
+    {
+        return visitPlan(node, context);
+    }
 }

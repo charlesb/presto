@@ -236,4 +236,10 @@ public class ChildReplacer
     {
         return new DeleteNode(node.getId(), Iterables.getOnlyElement(newChildren), node.getTarget(), node.getRowId(), node.getOutputSymbols());
     }
+
+    @Override
+    public PlanNode visitScalar(ScalarNode node, List<PlanNode> newChildren)
+    {
+        return new ScalarNode(node.getId(), Iterables.getOnlyElement(newChildren));
+    }
 }

@@ -33,6 +33,7 @@ import com.facebook.presto.sql.planner.plan.ProjectNode;
 import com.facebook.presto.sql.planner.plan.RemoteSourceNode;
 import com.facebook.presto.sql.planner.plan.RowNumberNode;
 import com.facebook.presto.sql.planner.plan.SampleNode;
+import com.facebook.presto.sql.planner.plan.ScalarNode;
 import com.facebook.presto.sql.planner.plan.SemiJoinNode;
 import com.facebook.presto.sql.planner.plan.SortNode;
 import com.facebook.presto.sql.planner.plan.TableCommitNode;
@@ -400,6 +401,13 @@ public final class GraphvizPrinter
         public Void visitValues(ValuesNode node, Void context)
         {
             printNode(node, "Values", NODE_COLORS.get(NodeType.TABLESCAN));
+            return null;
+        }
+
+        @Override
+        public Void visitScalar(ScalarNode node, Void context)
+        {
+            printNode(node, "Scalar", NODE_COLORS.get(NodeType.PROJECT));
             return null;
         }
 
