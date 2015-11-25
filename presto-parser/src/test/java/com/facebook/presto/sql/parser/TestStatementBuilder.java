@@ -179,8 +179,8 @@ public class TestStatementBuilder
         printStatement("drop view foo");
 
         printStatement("grant select on foo to testUser with grant option");
-        printStatement("grant insert on foo to testUser");
-        printStatement("grant delete on foo to public");
+        printStatement("grant all privileges on foo to testAdmin");
+        printStatement("grant delete, select on foo to public");
     }
 
     @Test

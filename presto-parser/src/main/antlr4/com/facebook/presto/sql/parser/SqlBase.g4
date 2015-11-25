@@ -46,7 +46,7 @@ statement
         ADD COLUMN column=tableElement                                 #addColumn
     | CREATE (OR REPLACE)? VIEW qualifiedName AS query                 #createView
     | DROP VIEW (IF EXISTS)? qualifiedName                             #dropView
-    | GRANT privilege
+    | GRANT (privilege (',' privilege)* | ALL PRIVILEGES)
         ON (TABLE)? qualifiedName TO (userList | PUBLIC)
         (WITH GRANT OPTION)?                                           #grant
     | EXPLAIN ('(' explainOption (',' explainOption)* ')')? statement  #explain
@@ -463,6 +463,7 @@ INTO: 'INTO';
 CONSTRAINT: 'CONSTRAINT';
 DESCRIBE: 'DESCRIBE';
 GRANT: 'GRANT';
+PRIVILEGES: 'PRIVILEGES';
 PUBLIC: 'PUBLIC';
 OPTION: 'OPTION';
 EXPLAIN: 'EXPLAIN';

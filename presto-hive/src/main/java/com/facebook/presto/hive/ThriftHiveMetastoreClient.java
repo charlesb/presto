@@ -176,6 +176,13 @@ public class ThriftHiveMetastoreClient
     }
 
     @Override
+    public List<String> getRoleNames()
+            throws TException
+    {
+        return client.get_role_names();
+    }
+
+    @Override
     public boolean grantPrivileges(PrivilegeBag privilegeBag)
             throws TException
     {

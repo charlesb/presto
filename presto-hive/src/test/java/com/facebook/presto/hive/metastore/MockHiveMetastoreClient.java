@@ -227,6 +227,12 @@ public class MockHiveMetastoreClient
     }
 
     @Override
+    public List<String> getRoleNames()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
     public boolean grantPrivileges(PrivilegeBag privilegeBag)
     {
         throw new UnsupportedOperationException();

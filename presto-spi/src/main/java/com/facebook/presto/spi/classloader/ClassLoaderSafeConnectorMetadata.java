@@ -282,10 +282,10 @@ public class ClassLoaderSafeConnectorMetadata
     }
 
     @Override
-    public void grantTablePrivilege(ConnectorSession session, SchemaTableName tableName, Privilege privilege, Identity identity, boolean grantOption)
+    public void grantTablePrivileges(ConnectorSession session, SchemaTableName tableName, Set<Privilege> privileges, Identity identity, boolean grantOption)
     {
         try (ThreadContextClassLoader ignored = new ThreadContextClassLoader(classLoader)) {
-            delegate.grantTablePrivilege(session, tableName, privilege, identity, grantOption);
+            delegate.grantTablePrivileges(session, tableName, privileges, identity, grantOption);
         }
     }
 

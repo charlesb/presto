@@ -278,7 +278,7 @@ public interface ConnectorMetadata
     /**
      * Grants the specified privilege to the specified user on the specified table
      */
-    default void grantTablePrivilege(ConnectorSession session, SchemaTableName tableName, Privilege privilege, Identity identity, boolean grantOption)
+    default void grantTablePrivileges(ConnectorSession session, SchemaTableName tableName, Set<Privilege> privilege, Identity identity, boolean grantOption)
     {
         throw new PrestoException(NOT_SUPPORTED, "This connector does not support grants");
     }

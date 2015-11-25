@@ -13,6 +13,9 @@
  */
 package com.facebook.presto.sql.tree;
 
+import com.google.common.collect.ImmutableList;
+
+import java.util.List;
 import java.util.Objects;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
@@ -21,24 +24,24 @@ import static java.util.Objects.requireNonNull;
 public class Grant
         extends Statement
 {
-    private final PrestoPrivilege prestoPrivilege;
+    private final List<PrestoPrivilege> prestoPrivileges;
     private final boolean table;
     private final QualifiedName tableName;
     private final PrestoIdentity prestoIdentity;
     private final boolean option;
 
-    public Grant(PrestoPrivilege prestoPrivilege, boolean table, QualifiedName tableName, PrestoIdentity prestoIdentity, boolean option)
+    public Grant(List<PrestoPrivilege> prestoPrivileges, boolean table, QualifiedName tableName, PrestoIdentity prestoIdentity, boolean option)
     {
-        this.prestoPrivilege = requireNonNull(prestoPrivilege, "privilege is null");
+        this.prestoPrivileges = ImmutableList.copyOf(requireNonNull(prestoPrivileges, "privilege is null"));
         this.table = table;
         this.tableName = requireNonNull(tableName, "table name is null");
         this.prestoIdentity = requireNonNull(prestoIdentity, "user/role is null");
         this.option = option;
     }
 
-    public PrestoPrivilege getPrestoPrivilege()
+    public List<PrestoPrivilege> getPrestoPrivileges()
     {
-        return prestoPrivilege;
+        return prestoPrivileges;
     }
 
     public boolean isTable()
@@ -70,7 +73,7 @@ public class Grant
     @Override
     public int hashCode()
     {
-        return Objects.hash(prestoPrivilege, table, tableName, prestoIdentity, option);
+        return Objects.hash(prestoPrivileges, table, tableName, prestoIdentity, option);
     }
 
     @Override
@@ -83,7 +86,7 @@ public class Grant
             return false;
         }
         Grant o = (Grant) obj;
-        return Objects.equals(prestoPrivilege, o.prestoPrivilege) &&
+        return Objects.equals(prestoPrivileges, o.prestoPrivileges) &&
                 Objects.equals(table, o.table) &&
                 Objects.equals(tableName, o.tableName) &&
                 Objects.equals(prestoIdentity, o.prestoIdentity) &&
@@ -94,7 +97,7 @@ public class Grant
     public String toString()
     {
         return toStringHelper(this)
-                .add("prestoPrivilege", prestoPrivilege)
+                .add("prestoPrivileges", prestoPrivileges)
                 .add("table", table)
                 .add("tableName", tableName)
                 .add("prestoIdentity", prestoIdentity)

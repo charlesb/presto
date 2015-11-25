@@ -891,17 +891,29 @@ public class CachingHiveMetastore
     }
 
     @Override
-    public void grantTablePrivilege(String databaseName, String tableName, Identity identity, PrivilegeGrantInfo privilegeGrantInfo)
+    public void grantTablePrivileges(String databaseName, String tableName, Identity identity, Set<PrivilegeGrantInfo> privilegeGrantInfoSet)
     {
         try (HiveMetastoreClient metastoreClient = clientProvider.createMetastoreClient()) {
-            HiveObjectPrivilege privilegeObject = new HiveObjectPrivilege(
-                    new HiveObjectRef(HiveObjectType.TABLE, databaseName, tableName, null, null),
-                    identity.getUser(),
-                    PrincipalType.USER, // TODO: check whether it is USER or ROLE.
-                    privilegeGrantInfo);
-            ImmutableList.Builder<HiveObjectPrivilege> privilegeBagList = ImmutableList.builder();
-            privilegeBagList.add(privilegeObject);
+            PrincipalType principalType;
 
+            List<String> roles = metastoreClient.getRoleNames();
+
+            if (roles.contains(identity.getUser())) {
+                principalType = PrincipalType.ROLE;
+            }
+            else {
+                principalType = PrincipalType.USER;
+            }
+
+            ImmutableList.Builder<HiveObjectPrivilege> privilegeBagList = ImmutableList.builder();
+            for (PrivilegeGrantInfo privilegeGrantInfo : privilegeGrantInfoSet) {
+                HiveObjectPrivilege privilegeObject = new HiveObjectPrivilege(
+                        new HiveObjectRef(HiveObjectType.TABLE, databaseName, tableName, null, null), // TODO: handle grant on non-table objects
+                        identity.getUser(),
+                        principalType,
+                        privilegeGrantInfo);
+                privilegeBagList.add(privilegeObject);
+            }
             // Should you check whether the user already has the given privilege and if yes, return.
             metastoreClient.grantPrivileges(new PrivilegeBag(privilegeBagList.build()));
         }

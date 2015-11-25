@@ -83,6 +83,9 @@ public interface HiveMetastoreClient
     PrincipalPrivilegeSet getPrivilegeSet(HiveObjectRef hiveObject, String userName, List<String> groupNames)
             throws TException;
 
+    List<String> getRoleNames()
+            throws TException;
+
     boolean grantPrivileges(PrivilegeBag privilegeBag)
             throws TException;
 }

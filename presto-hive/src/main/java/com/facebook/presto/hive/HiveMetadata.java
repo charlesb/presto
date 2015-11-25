@@ -1271,7 +1271,7 @@ public class HiveMetadata
     }
 
     @Override
-    public void grantTablePrivilege(ConnectorSession session, SchemaTableName schemaTableName, Privilege privilege, Identity identity, boolean grantOption)
+    public void grantTablePrivileges(ConnectorSession session, SchemaTableName schemaTableName, Set<Privilege> privileges, Identity identity, boolean grantOption)
     {
         String schemaName = schemaTableName.getSchemaName();
 
@@ -1281,9 +1281,13 @@ public class HiveMetadata
         // - check that the user/role exists in the hive metastore. If not, throw NotFoundException
         // - check whether the user already has the given privilege. If yes, there is nothing more to do, so return.
 
-        PrivilegeGrantInfo privilegeGrantInfo = new PrivilegeGrantInfo(privilege.getTypeString().toLowerCase(), 0,
-                session.getUser(), PrincipalType.USER, grantOption);
-        metastore.grantTablePrivilege(schemaName, tableName, identity, privilegeGrantInfo);
+        Set<PrivilegeGrantInfo> privilegeGrantInfoSet = new HashSet<>();
+
+        for (Privilege privilege : privileges) {
+            privilegeGrantInfoSet.add(new PrivilegeGrantInfo(privilege.getTypeString().toLowerCase(), 0,
+                                      session.getUser(), PrincipalType.USER, grantOption));
+        }
+        metastore.grantTablePrivileges(schemaName, tableName, identity, privilegeGrantInfoSet);
     }
 
     @Override

@@ -913,12 +913,18 @@ public class TestSqlParser
     public void testGrant()
             throws Exception
     {
-        assertStatement("GRANT INSERT ON customer to admin",
-                new Grant(new PrestoPrivilege(PrestoPrivilege.Type.INSERT), false, QualifiedName.of("customer"),
+        assertStatement("GRANT INSERT, DELETE ON customer to admin",
+                new Grant(ImmutableList.of(new PrestoPrivilege(PrestoPrivilege.Type.INSERT), new PrestoPrivilege(PrestoPrivilege.Type.DELETE)),
+                        false, QualifiedName.of("customer"),
                         new PrestoIdentity(QualifiedName.of("admin")), false));
         assertStatement("GRANT SELECT ON orders to PUBLIC WITH GRANT OPTION",
-                new Grant(new PrestoPrivilege(PrestoPrivilege.Type.SELECT), false, QualifiedName.of("orders"),
+                new Grant(ImmutableList.of(new PrestoPrivilege(PrestoPrivilege.Type.SELECT)),
+                        false, QualifiedName.of("orders"),
                         new PrestoIdentity(QualifiedName.of("PUBLIC")), true));
+        assertStatement("GRANT ALL PRIVILEGES ON nation to admin",
+                new Grant(ImmutableList.of(new PrestoPrivilege(PrestoPrivilege.Type.SELECT), new PrestoPrivilege(PrestoPrivilege.Type.INSERT),
+                        new PrestoPrivilege(PrestoPrivilege.Type.DELETE)), false, QualifiedName.of("nation"),
+                        new PrestoIdentity(QualifiedName.of("admin")), false));
     }
 
     @Test

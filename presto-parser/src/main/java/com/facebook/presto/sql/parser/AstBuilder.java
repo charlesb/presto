@@ -479,8 +479,16 @@ class AstBuilder
         else {
             prestoIdentity = processIdentity(context.userList());
         }
+
+        List<PrestoPrivilege> prestoPrivileges;
+        if (context.ALL() != null && context.PRIVILEGES() != null) {
+            prestoPrivileges = PrestoPrivilege.getAllPrestoPrivileges();
+        }
+        else {
+            prestoPrivileges = visit(context.privilege(), PrestoPrivilege.class);
+        }
         return new Grant(
-                (PrestoPrivilege) visit(context.privilege()),
+                prestoPrivileges,
                 context.TABLE() != null,
                 getQualifiedName(context.qualifiedName()),
                 prestoIdentity,

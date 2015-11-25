@@ -13,6 +13,9 @@
  */
 package com.facebook.presto.sql.tree;
 
+import com.google.common.collect.ImmutableList;
+
+import java.util.List;
 import java.util.Objects;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
@@ -33,6 +36,15 @@ public class PrestoPrivilege
     public PrestoPrivilege(Type type)
     {
         this.type = requireNonNull(type, "type is null");
+    }
+
+    public static List<PrestoPrivilege> getAllPrestoPrivileges()
+    {
+        ImmutableList.Builder<PrestoPrivilege> list = ImmutableList.builder();
+        for (Type value : Type.values()) {
+            list.add(new PrestoPrivilege(value));
+        }
+        return list.build();
     }
 
     public Type getType()

@@ -668,12 +668,12 @@ public class MetadataManager
     }
 
     @Override
-    public void grantTablePrivilege(Session session, QualifiedTableName tableName, Privilege privilege, Identity identity, boolean grantOption)
+    public void grantTablePrivileges(Session session, QualifiedTableName tableName, Set<Privilege> privileges, Identity identity, boolean grantOption)
     {
         ConnectorMetadataEntry connectorMetadata = connectorsByCatalog.get(tableName.getCatalogName());
         checkArgument(connectorMetadata != null, "Catalog %s does not exist", tableName.getCatalogName());
-        connectorMetadata.getMetadata().grantTablePrivilege(session.toConnectorSession(connectorMetadata.getCatalog()),
-                tableName.asSchemaTableName(), privilege, identity, grantOption);
+        connectorMetadata.getMetadata().grantTablePrivileges(session.toConnectorSession(connectorMetadata.getCatalog()),
+                tableName.asSchemaTableName(), privileges, identity, grantOption);
     }
 
     @Override

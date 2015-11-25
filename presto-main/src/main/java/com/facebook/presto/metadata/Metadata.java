@@ -242,7 +242,7 @@ public interface Metadata
     /**
      * Grants the specified privilege to the specified user on the specified table
      */
-    void grantTablePrivilege(Session session, QualifiedTableName tableName, Privilege privilege, Identity identity, boolean grantOption);
+    void grantTablePrivileges(Session session, QualifiedTableName tableName, Set<Privilege> privileges, Identity identity, boolean grantOption);
 
     FunctionRegistry getFunctionRegistry();
 

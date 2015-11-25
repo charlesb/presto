@@ -386,9 +386,12 @@ public class InMemoryHiveMetastore
     }
 
     @Override
-    public void grantTablePrivilege(String databaseName, String tableName, Identity identity, PrivilegeGrantInfo privilege)
+    public void grantTablePrivileges(String databaseName, String tableName, Identity identity, Set<PrivilegeGrantInfo> privilegeGrantInfoSet)
     {
-        Set<HivePrivilege> hivePrivileges = parsePrivilege(privilege);
+        Set<HivePrivilege> hivePrivileges = new HashSet<>();
+        for (PrivilegeGrantInfo privilegeGrantInfo : privilegeGrantInfoSet) {
+            hivePrivileges.addAll(parsePrivilege(privilegeGrantInfo));
+        }
         setTablePrivileges(identity.getUser(), PrincipalType.USER, databaseName, tableName, hivePrivileges);
     }
 

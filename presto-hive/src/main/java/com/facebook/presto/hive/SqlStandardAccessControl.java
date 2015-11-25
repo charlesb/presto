@@ -182,7 +182,7 @@ public class SqlStandardAccessControl
     @Override
     public void checkCanGrantTablePrivilege(Identity identity, Privilege privilege, SchemaTableName tableName)
     {
-        if (!checkTablePermission(identity, tableName, OWNERSHIP)) {
+        if (!checkTablePermission(identity, tableName, GRANT)) {
             denyGrantTablePrivilege(privilege.toString(), tableName.toString());
         }
     }

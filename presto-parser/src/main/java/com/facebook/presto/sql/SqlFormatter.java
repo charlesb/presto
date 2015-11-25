@@ -38,6 +38,7 @@ import com.facebook.presto.sql.tree.JoinOn;
 import com.facebook.presto.sql.tree.JoinUsing;
 import com.facebook.presto.sql.tree.NaturalJoin;
 import com.facebook.presto.sql.tree.Node;
+import com.facebook.presto.sql.tree.PrestoPrivilege;
 import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.QuerySpecification;
 import com.facebook.presto.sql.tree.Relation;
@@ -734,9 +735,18 @@ public final class SqlFormatter
         @Override
         public Void visitGrant(Grant node, Integer indent)
         {
-            builder.append("GRANT ")
-                    .append(node.getPrestoPrivilege().getTypeString())
-                    .append(" ON ");
+            builder.append("GRANT ");
+
+            int size = node.getPrestoPrivileges().size();
+
+            for (PrestoPrivilege prestoPrivilege : node.getPrestoPrivileges()) {
+                builder.append(prestoPrivilege.getTypeString());
+                size = size - 1;
+                if (size > 0) {
+                    builder.append(", ");
+                }
+            }
+            builder.append(" ON ");
             if (node.isTable()) {
                 builder.append("TABLE ");
             }
