@@ -286,6 +286,7 @@ public class CachingHiveMetastore
         tableCache.invalidateAll();
         partitionCache.invalidateAll();
         partitionFilterCache.invalidateAll();
+        userTablePrivileges.invalidateAll();
     }
 
     private static <K, V> V get(LoadingCache<K, V> cache, K key)
@@ -893,32 +894,48 @@ public class CachingHiveMetastore
     @Override
     public void grantTablePrivileges(String databaseName, String tableName, Identity identity, Set<PrivilegeGrantInfo> privilegeGrantInfoSet)
     {
-        try (HiveMetastoreClient metastoreClient = clientProvider.createMetastoreClient()) {
-            PrincipalType principalType;
+        try {
+            retry()
+                    .stopOnIllegalExceptions()
+                    .run("grantTablePrivileges", stats.getGrantTablePrivileges().wrap(() -> {
+                        try (HiveMetastoreClient metastoreClient = clientProvider.createMetastoreClient()) {
+                            PrincipalType principalType;
 
-            List<String> roles = metastoreClient.getRoleNames();
+                            List<String> roles = metastoreClient.getRoleNames();
 
-            if (roles.contains(identity.getUser())) {
-                principalType = PrincipalType.ROLE;
-            }
-            else {
-                principalType = PrincipalType.USER;
-            }
+                            if (roles.contains(identity.getUser())) {
+                                principalType = PrincipalType.ROLE;
+                            }
+                            else {
+                                principalType = PrincipalType.USER;
+                            }
 
-            ImmutableList.Builder<HiveObjectPrivilege> privilegeBagList = ImmutableList.builder();
-            for (PrivilegeGrantInfo privilegeGrantInfo : privilegeGrantInfoSet) {
-                HiveObjectPrivilege privilegeObject = new HiveObjectPrivilege(
-                        new HiveObjectRef(HiveObjectType.TABLE, databaseName, tableName, null, null), // TODO: handle grant on non-table objects
-                        identity.getUser(),
-                        principalType,
-                        privilegeGrantInfo);
-                privilegeBagList.add(privilegeObject);
-            }
-            // Should you check whether the user already has the given privilege and if yes, return.
-            metastoreClient.grantPrivileges(new PrivilegeBag(privilegeBagList.build()));
+                            ImmutableList.Builder<HiveObjectPrivilege> privilegeBagList = ImmutableList.builder();
+                            for (PrivilegeGrantInfo privilegeGrantInfo : privilegeGrantInfoSet) {
+                                HiveObjectPrivilege privilegeObject = new HiveObjectPrivilege(
+                                    new HiveObjectRef(HiveObjectType.TABLE, databaseName, tableName, null, null), // TODO: handle grant on non-table objects
+                                    identity.getUser(),
+                                    principalType,
+                                    privilegeGrantInfo);
+                                privilegeBagList.add(privilegeObject);
+                            }
+                            // Should you check whether the user already has the given privilege and if yes, return.
+                            metastoreClient.grantPrivileges(new PrivilegeBag(privilegeBagList.build()));
+                        }
+                        return null;
+                    }));
         }
         catch (TException e) {
             throw new PrestoException(HIVE_METASTORE_ERROR, e);
+        }
+        catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw Throwables.propagate(e);
+        }
+        finally {
+            userTablePrivileges.invalidate(new UserTableKey(identity.getUser(), tableName, databaseName));
         }
     }
 
