@@ -13,36 +13,38 @@
  */
 package com.facebook.presto.sql.tree;
 
+import com.facebook.presto.spi.security.Identity;
+
 import java.util.Objects;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
-public class PrestoIdentity
+public class IdentityNode
         extends Node
 {
-    private final QualifiedName name;
+    private final Identity identity;
 
-    public PrestoIdentity(QualifiedName name)
+    public IdentityNode(Identity identity)
     {
-        this.name = requireNonNull(name, "user/role is null");
+        this.identity = requireNonNull(identity, "user/role is null");
     }
 
-    public QualifiedName getName()
+    public Identity getIdentity()
     {
-        return name;
+        return identity;
     }
 
     @Override
     public <R, C> R accept(AstVisitor<R, C> visitor, C context)
     {
-        return visitor.visitNode(this, context);
+        return visitor.visitIdentityNode(this, context);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(name);
+        return Objects.hash(identity);
     }
 
     @Override
@@ -54,15 +56,15 @@ public class PrestoIdentity
         if (obj == null || (getClass() != obj.getClass())) {
             return false;
         }
-        PrestoIdentity o = (PrestoIdentity) obj;
-        return Objects.equals(name, o.name);
+        IdentityNode o = (IdentityNode) obj;
+        return Objects.equals(identity, o.identity);
     }
 
     @Override
     public String toString()
     {
         return toStringHelper(this)
-                .add("name", name)
+                .add("identity", identity)
                 .toString();
     }
 }

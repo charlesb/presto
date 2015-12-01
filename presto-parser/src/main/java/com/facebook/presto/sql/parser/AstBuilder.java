@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.sql.parser;
 
+import com.facebook.presto.spi.security.Identity;
+import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.sql.parser.SqlBaseParser.TablePropertiesContext;
 import com.facebook.presto.sql.parser.SqlBaseParser.TablePropertyContext;
 import com.facebook.presto.sql.tree.AddColumn;
@@ -48,6 +50,7 @@ import com.facebook.presto.sql.tree.FrameBound;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.GenericLiteral;
 import com.facebook.presto.sql.tree.Grant;
+import com.facebook.presto.sql.tree.IdentityNode;
 import com.facebook.presto.sql.tree.IfExpression;
 import com.facebook.presto.sql.tree.InListExpression;
 import com.facebook.presto.sql.tree.InPredicate;
@@ -69,8 +72,7 @@ import com.facebook.presto.sql.tree.Node;
 import com.facebook.presto.sql.tree.NotExpression;
 import com.facebook.presto.sql.tree.NullIfExpression;
 import com.facebook.presto.sql.tree.NullLiteral;
-import com.facebook.presto.sql.tree.PrestoIdentity;
-import com.facebook.presto.sql.tree.PrestoPrivilege;
+import com.facebook.presto.sql.tree.PrivilegeNode;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.QualifiedNameReference;
 import com.facebook.presto.sql.tree.Query;
@@ -122,6 +124,7 @@ import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.TerminalNode;
 
+import java.security.Principal;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -472,23 +475,23 @@ class AstBuilder
     @Override
     public Node visitGrant(SqlBaseParser.GrantContext context)
     {
-        PrestoIdentity prestoIdentity;
+        IdentityNode prestoIdentity;
         if (context.PUBLIC() != null) {
-            prestoIdentity = new PrestoIdentity(new QualifiedName("PUBLIC"));
+            prestoIdentity = new IdentityNode(new Identity("PUBLIC", Optional.<Principal>empty()));
         }
         else {
-            prestoIdentity = processIdentity(context.userList());
+            prestoIdentity = (IdentityNode) visit(context.identity());
         }
 
-        List<PrestoPrivilege> prestoPrivileges;
+        List<PrivilegeNode> privilegeNodes;
         if (context.ALL() != null && context.PRIVILEGES() != null) {
-            prestoPrivileges = PrestoPrivilege.getAllPrestoPrivileges();
+            privilegeNodes = PrivilegeNode.getAllPrivilegeNodes();
         }
         else {
-            prestoPrivileges = visit(context.privilege(), PrestoPrivilege.class);
+            privilegeNodes = visit(context.privilege(), PrivilegeNode.class);
         }
         return new Grant(
-                prestoPrivileges,
+                privilegeNodes,
                 context.TABLE() != null,
                 getQualifiedName(context.qualifiedName()),
                 prestoIdentity,
@@ -496,22 +499,23 @@ class AstBuilder
     }
 
     @Override
-    public Node visitPrestoPrivilege(SqlBaseParser.PrestoPrivilegeContext context)
+    public Node visitPrivilegeNode(SqlBaseParser.PrivilegeNodeContext context)
     {
         switch (context.value.getType()) {
             case SqlBaseLexer.SELECT:
-                return new PrestoPrivilege(PrestoPrivilege.Type.SELECT);
+                return new PrivilegeNode(new Privilege(Privilege.PrivilegeType.SELECT));
             case SqlBaseLexer.INSERT:
-                return new PrestoPrivilege(PrestoPrivilege.Type.INSERT);
+                return new PrivilegeNode(new Privilege(Privilege.PrivilegeType.INSERT));
             case SqlBaseLexer.DELETE:
-                return new PrestoPrivilege(PrestoPrivilege.Type.DELETE);
+                return new PrivilegeNode(new Privilege(Privilege.PrivilegeType.DELETE));
         }
         throw new IllegalArgumentException("Unsupported Privilege: " + context.value.toString());
     }
 
-    private PrestoIdentity processIdentity(SqlBaseParser.UserListContext context)
+    @Override
+    public Node visitIdentityNode(SqlBaseParser.IdentityNodeContext context)
     {
-        return new PrestoIdentity(getQualifiedName(context.qualifiedName()));
+        return new IdentityNode(new Identity(getQualifiedName(context.qualifiedName()).toString(), Optional.<Principal>empty()));
     }
 
     // ***************** boolean expressions ******************

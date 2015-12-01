@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.sql.tree;
 
+import com.facebook.presto.spi.security.Privilege;
 import com.google.common.collect.ImmutableList;
 
 import java.util.List;
@@ -21,60 +22,40 @@ import java.util.Objects;
 import static com.google.common.base.MoreObjects.toStringHelper;
 import static java.util.Objects.requireNonNull;
 
-public class PrestoPrivilege
+public class PrivilegeNode
         extends Node
 {
-    public enum Type
+    private final Privilege privilege;
+
+    public PrivilegeNode(Privilege privilege)
     {
-        SELECT,
-        INSERT,
-        DELETE
+        this.privilege = requireNonNull(privilege, "privilege type is null");
     }
 
-    private final Type type;
-
-    public PrestoPrivilege(Type type)
+    public Privilege getPrivilege()
     {
-        this.type = requireNonNull(type, "type is null");
+        return privilege;
     }
 
-    public static List<PrestoPrivilege> getAllPrestoPrivileges()
+    public static List<PrivilegeNode> getAllPrivilegeNodes()
     {
-        ImmutableList.Builder<PrestoPrivilege> list = ImmutableList.builder();
-        for (Type value : Type.values()) {
-            list.add(new PrestoPrivilege(value));
+        ImmutableList.Builder<PrivilegeNode> list = ImmutableList.builder();
+        for (Privilege privilege : Privilege.getAllPrivileges()) {
+            list.add(new PrivilegeNode(privilege));
         }
         return list.build();
-    }
-
-    public Type getType()
-    {
-        return type;
-    }
-
-    public String getTypeString()
-    {
-        switch (this.type) {
-            case SELECT:
-                return "SELECT";
-            case INSERT:
-                return "INSERT";
-            case DELETE:
-                return "DELETE";
-        }
-        return null;
     }
 
     @Override
     public <R, C> R accept(AstVisitor<R, C> visitor, C context)
     {
-        return visitor.visitPrestoPrivilege(this, context);
+        return visitor.visitPrivilegeNode(this, context);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(type);
+        return Objects.hash(privilege);
     }
 
     @Override
@@ -86,15 +67,15 @@ public class PrestoPrivilege
         if (obj == null || (getClass() != obj.getClass())) {
             return false;
         }
-        PrestoPrivilege o = (PrestoPrivilege) obj;
-        return Objects.equals(type, o.type);
+        PrivilegeNode o = (PrivilegeNode) obj;
+        return Objects.equals(privilege, o.privilege);
     }
 
     @Override
     public String toString()
     {
         return toStringHelper(this)
-                .add("type", type)
+                .add("privilege", privilege)
                 .toString();
     }
 }

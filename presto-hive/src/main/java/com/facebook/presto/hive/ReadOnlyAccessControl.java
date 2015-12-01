@@ -119,6 +119,6 @@ public class ReadOnlyAccessControl
     @Override
     public void checkCanGrantTablePrivilege(Identity identity, Privilege privilege, SchemaTableName tableName)
     {
-        denyGrantTablePrivilege(privilege.toString(), tableName.toString());
+        denyGrantTablePrivilege(privilege.toString(), tableName.toString(), identity.getUser());
     }
 }

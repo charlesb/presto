@@ -15,7 +15,7 @@ package com.facebook.presto.security;
 
 import com.facebook.presto.metadata.QualifiedTableName;
 import com.facebook.presto.spi.security.Identity;
-import com.facebook.presto.sql.tree.PrestoPrivilege;
+import com.facebook.presto.spi.security.Privilege;
 
 import java.security.Principal;
 
@@ -123,9 +123,9 @@ public class DenyAllAccessControl
     }
 
     @Override
-    public void checkCanGrantTablePrivilege(Identity identity, PrestoPrivilege privilege, QualifiedTableName tableName)
+    public void checkCanGrantTablePrivilege(Identity identity, Privilege privilege, QualifiedTableName tableName)
     {
-        denyGrantTablePrivilege(privilege.toString(), tableName.toString());
+        denyGrantTablePrivilege(privilege.getTypeString(), tableName.toString(), identity.getUser());
     }
 
     @Override

@@ -38,7 +38,7 @@ import com.facebook.presto.sql.tree.JoinOn;
 import com.facebook.presto.sql.tree.JoinUsing;
 import com.facebook.presto.sql.tree.NaturalJoin;
 import com.facebook.presto.sql.tree.Node;
-import com.facebook.presto.sql.tree.PrestoPrivilege;
+import com.facebook.presto.sql.tree.PrivilegeNode;
 import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.QuerySpecification;
 import com.facebook.presto.sql.tree.Relation;
@@ -737,10 +737,10 @@ public final class SqlFormatter
         {
             builder.append("GRANT ");
 
-            int size = node.getPrestoPrivileges().size();
+            int size = node.getPrivilegeNodes().size();
 
-            for (PrestoPrivilege prestoPrivilege : node.getPrestoPrivileges()) {
-                builder.append(prestoPrivilege.getTypeString());
+            for (PrivilegeNode privilegeNode : node.getPrivilegeNodes()) {
+                builder.append(privilegeNode.getPrivilege().getTypeString());
                 size = size - 1;
                 if (size > 0) {
                     builder.append(", ");
@@ -752,7 +752,7 @@ public final class SqlFormatter
             }
             builder.append(node.getTableName())
                     .append(" TO ")
-                    .append(node.getPrestoIdentity().getName());
+                    .append(node.getIdentityNode().getIdentity());
             if (node.isOption()) {
                 builder.append(" WITH GRANT OPTION");
             }

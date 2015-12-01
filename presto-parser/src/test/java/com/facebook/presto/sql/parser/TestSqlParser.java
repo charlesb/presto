@@ -13,6 +13,8 @@
  */
 package com.facebook.presto.sql.parser;
 
+import com.facebook.presto.spi.security.Identity;
+import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.sql.tree.AddColumn;
 import com.facebook.presto.sql.tree.AllColumns;
 import com.facebook.presto.sql.tree.Approximate;
@@ -38,6 +40,7 @@ import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.GenericLiteral;
 import com.facebook.presto.sql.tree.Grant;
+import com.facebook.presto.sql.tree.IdentityNode;
 import com.facebook.presto.sql.tree.Insert;
 import com.facebook.presto.sql.tree.Intersect;
 import com.facebook.presto.sql.tree.IntervalLiteral;
@@ -53,8 +56,7 @@ import com.facebook.presto.sql.tree.NaturalJoin;
 import com.facebook.presto.sql.tree.Node;
 import com.facebook.presto.sql.tree.NotExpression;
 import com.facebook.presto.sql.tree.NullLiteral;
-import com.facebook.presto.sql.tree.PrestoIdentity;
-import com.facebook.presto.sql.tree.PrestoPrivilege;
+import com.facebook.presto.sql.tree.PrivilegeNode;
 import com.facebook.presto.sql.tree.QualifiedName;
 import com.facebook.presto.sql.tree.QualifiedNameReference;
 import com.facebook.presto.sql.tree.Query;
@@ -86,8 +88,12 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import org.testng.annotations.Test;
 
+import java.security.Principal;
 import java.util.Optional;
 
+import static com.facebook.presto.spi.security.Privilege.PrivilegeType.DELETE;
+import static com.facebook.presto.spi.security.Privilege.PrivilegeType.INSERT;
+import static com.facebook.presto.spi.security.Privilege.PrivilegeType.SELECT;
 import static com.facebook.presto.sql.QueryUtil.query;
 import static com.facebook.presto.sql.QueryUtil.row;
 import static com.facebook.presto.sql.QueryUtil.selectList;
@@ -914,17 +920,18 @@ public class TestSqlParser
             throws Exception
     {
         assertStatement("GRANT INSERT, DELETE ON customer to admin",
-                new Grant(ImmutableList.of(new PrestoPrivilege(PrestoPrivilege.Type.INSERT), new PrestoPrivilege(PrestoPrivilege.Type.DELETE)),
+                new Grant(ImmutableList.of(new PrivilegeNode(new Privilege(INSERT)),
+                        new PrivilegeNode(new Privilege(DELETE))),
                         false, QualifiedName.of("customer"),
-                        new PrestoIdentity(QualifiedName.of("admin")), false));
+                        new IdentityNode(new Identity("admin", Optional.<Principal>empty())), false));
         assertStatement("GRANT SELECT ON orders to PUBLIC WITH GRANT OPTION",
-                new Grant(ImmutableList.of(new PrestoPrivilege(PrestoPrivilege.Type.SELECT)),
+                new Grant(ImmutableList.of(new PrivilegeNode(new Privilege(SELECT))),
                         false, QualifiedName.of("orders"),
-                        new PrestoIdentity(QualifiedName.of("PUBLIC")), true));
+                        new IdentityNode(new Identity("PUBLIC", Optional.<Principal>empty())), true));
         assertStatement("GRANT ALL PRIVILEGES ON nation to admin",
-                new Grant(ImmutableList.of(new PrestoPrivilege(PrestoPrivilege.Type.SELECT), new PrestoPrivilege(PrestoPrivilege.Type.INSERT),
-                        new PrestoPrivilege(PrestoPrivilege.Type.DELETE)), false, QualifiedName.of("nation"),
-                        new PrestoIdentity(QualifiedName.of("admin")), false));
+                new Grant(PrivilegeNode.getAllPrivilegeNodes(),
+                        false, QualifiedName.of("nation"),
+                        new IdentityNode(new Identity("admin", Optional.<Principal>empty())), false));
     }
 
     @Test

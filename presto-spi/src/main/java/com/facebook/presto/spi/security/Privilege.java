@@ -15,6 +15,8 @@ package com.facebook.presto.spi.security;
 
 import com.facebook.presto.spi.PrestoException;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
@@ -22,45 +24,40 @@ import static java.util.Objects.requireNonNull;
 
 public class Privilege
 {
-    public enum Type
+    public enum PrivilegeType
     {
         SELECT,
         INSERT,
         DELETE
     }
 
-    private final Type type;
+    private final PrivilegeType privilegeType;
 
-    public Privilege(Type type)
+    public Privilege(PrivilegeType privilegeType)
     {
-        this.type = requireNonNull(type, "type is null");
+        this.privilegeType = requireNonNull(privilegeType, "privilegeType is null");
     }
 
-    public Privilege(String typeString)
+    public Privilege(String privilegeTypeString)
     {
-        switch (typeString) {
+        switch (privilegeTypeString) {
             case "SELECT":
-                type = Type.SELECT;
+                privilegeType = PrivilegeType.SELECT;
                 break;
             case "INSERT":
-                type = Type.INSERT;
+                privilegeType = PrivilegeType.INSERT;
                 break;
             case "DELETE":
-                type = Type.DELETE;
+                privilegeType = PrivilegeType.DELETE;
                 break;
             default:
-                throw new PrestoException(NOT_SUPPORTED, "Unsupported privilege: " + typeString);
+                throw new PrestoException(NOT_SUPPORTED, "Unsupported privilege: " + privilegeTypeString);
         }
-    }
-
-    public Type getType()
-    {
-        return type;
     }
 
     public String getTypeString()
     {
-        switch (this.type) {
+        switch (this.privilegeType) {
             case SELECT:
                 return "SELECT";
             case INSERT:
@@ -71,10 +68,24 @@ public class Privilege
         return null;
     }
 
+    public static List<Privilege> getAllPrivileges()
+    {
+        List<Privilege> privileges = new ArrayList<Privilege>();
+        for (PrivilegeType value : PrivilegeType.values()) {
+            privileges.add(new Privilege(value));
+        }
+        return privileges;
+    }
+
+    public PrivilegeType getPrivilegeType()
+    {
+        return privilegeType;
+    }
+
     @Override
     public int hashCode()
     {
-        return Objects.hash(type);
+        return Objects.hash(privilegeType);
     }
 
     @Override
@@ -87,14 +98,14 @@ public class Privilege
             return false;
         }
         Privilege o = (Privilege) obj;
-        return Objects.equals(type, o.getType());
+        return Objects.equals(privilegeType, o.getPrivilegeType());
     }
 
     @Override
     public String toString()
     {
         StringBuilder sb = new StringBuilder("Privilege{");
-        sb.append("type=").append(type).append("}");
+        sb.append("privilegeType=").append(privilegeType).append("}");
         return sb.toString();
     }
 }

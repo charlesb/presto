@@ -24,24 +24,24 @@ import static java.util.Objects.requireNonNull;
 public class Grant
         extends Statement
 {
-    private final List<PrestoPrivilege> prestoPrivileges;
+    private final List<PrivilegeNode> privilegeNodes;
     private final boolean table;
     private final QualifiedName tableName;
-    private final PrestoIdentity prestoIdentity;
-    private final boolean option;
+    private final IdentityNode identityNode;
+    private final boolean withGrantOption;
 
-    public Grant(List<PrestoPrivilege> prestoPrivileges, boolean table, QualifiedName tableName, PrestoIdentity prestoIdentity, boolean option)
+    public Grant(List<PrivilegeNode> privilegeNodes, boolean table, QualifiedName tableName, IdentityNode identityNode, boolean withGrantOption)
     {
-        this.prestoPrivileges = ImmutableList.copyOf(requireNonNull(prestoPrivileges, "privilege is null"));
+        this.privilegeNodes = ImmutableList.copyOf(requireNonNull(privilegeNodes, "privilege is null"));
         this.table = table;
         this.tableName = requireNonNull(tableName, "table name is null");
-        this.prestoIdentity = requireNonNull(prestoIdentity, "user/role is null");
-        this.option = option;
+        this.identityNode = requireNonNull(identityNode, "user/role is null");
+        this.withGrantOption = withGrantOption;
     }
 
-    public List<PrestoPrivilege> getPrestoPrivileges()
+    public List<PrivilegeNode> getPrivilegeNodes()
     {
-        return prestoPrivileges;
+        return privilegeNodes;
     }
 
     public boolean isTable()
@@ -54,14 +54,14 @@ public class Grant
         return tableName;
     }
 
-    public PrestoIdentity getPrestoIdentity()
+    public IdentityNode getIdentityNode()
     {
-        return prestoIdentity;
+        return identityNode;
     }
 
     public boolean isOption()
     {
-        return option;
+        return withGrantOption;
     }
 
     @Override
@@ -73,7 +73,7 @@ public class Grant
     @Override
     public int hashCode()
     {
-        return Objects.hash(prestoPrivileges, table, tableName, prestoIdentity, option);
+        return Objects.hash(privilegeNodes, table, tableName, identityNode, withGrantOption);
     }
 
     @Override
@@ -86,22 +86,22 @@ public class Grant
             return false;
         }
         Grant o = (Grant) obj;
-        return Objects.equals(prestoPrivileges, o.prestoPrivileges) &&
+        return Objects.equals(privilegeNodes, o.privilegeNodes) &&
                 Objects.equals(table, o.table) &&
                 Objects.equals(tableName, o.tableName) &&
-                Objects.equals(prestoIdentity, o.prestoIdentity) &&
-                Objects.equals(option, o.option);
+                Objects.equals(identityNode, o.identityNode) &&
+                Objects.equals(withGrantOption, o.withGrantOption);
     }
 
     @Override
     public String toString()
     {
         return toStringHelper(this)
-                .add("prestoPrivileges", prestoPrivileges)
+                .add("privilegeNodes", privilegeNodes)
                 .add("table", table)
                 .add("tableName", tableName)
-                .add("prestoIdentity", prestoIdentity)
-                .add("option", option)
+                .add("identityNode", identityNode)
+                .add("withGrantOption", withGrantOption)
                 .toString();
     }
 }

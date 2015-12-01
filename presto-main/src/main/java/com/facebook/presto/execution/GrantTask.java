@@ -22,7 +22,7 @@ import com.facebook.presto.spi.security.Identity;
 import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.sql.analyzer.SemanticException;
 import com.facebook.presto.sql.tree.Grant;
-import com.facebook.presto.sql.tree.PrestoPrivilege;
+import com.facebook.presto.sql.tree.PrivilegeNode;
 
 import java.util.HashSet;
 import java.util.Optional;
@@ -58,16 +58,16 @@ public class GrantTask
 
         Set<Privilege> privileges = new HashSet<>();
 
-        for (PrestoPrivilege prestoPrivilege : statement.getPrestoPrivileges()) {
-            accessControl.checkCanGrantTablePrivilege(session.getIdentity(), prestoPrivilege, tableName);
+        for (PrivilegeNode privilegeNode : statement.getPrivilegeNodes()) {
+            accessControl.checkCanGrantTablePrivilege(session.getIdentity(), privilegeNode.getPrivilege(), tableName);
 
             // TODO: if [WITH GRANT OPTION] is present, check that the current user has the ("GRANT") privilege to grant the privilege
 
-            privileges.add(new Privilege(prestoPrivilege.getTypeString()));
+            privileges.add(privilegeNode.getPrivilege());
         }
         // I don't fully understand the Identity object; what is user and what is principal? For now, I am passing grantee
         // as the user, but not sure if this is right.
-        Identity identity = new Identity(statement.getPrestoIdentity().getName().toString(), Optional.empty());
+        Identity identity = statement.getIdentityNode().getIdentity();
 
         metadata.grantTablePrivileges(session, tableName, privileges, identity, statement.isOption());
     }

@@ -487,7 +487,12 @@ public abstract class AstVisitor<R, C>
         return visitStatement(node, context);
     }
 
-    protected  R visitPrestoPrivilege(PrestoPrivilege node, C context)
+    protected R visitPrivilegeNode(PrivilegeNode node, C context)
+    {
+        return visitNode(node, context);
+    }
+
+    protected R visitIdentityNode(IdentityNode node, C context)
     {
         return visitNode(node, context);
     }

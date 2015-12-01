@@ -20,7 +20,6 @@ import com.facebook.presto.spi.security.Identity;
 import com.facebook.presto.spi.security.Privilege;
 import com.facebook.presto.spi.security.SystemAccessControl;
 import com.facebook.presto.spi.security.SystemAccessControlFactory;
-import com.facebook.presto.sql.tree.PrestoPrivilege;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import io.airlift.log.Logger;
@@ -310,14 +309,14 @@ public class AccessControlManager
     }
 
     @Override
-    public void checkCanGrantTablePrivilege(Identity identity, PrestoPrivilege privilege, QualifiedTableName tableName)
+    public void checkCanGrantTablePrivilege(Identity identity, Privilege privilege, QualifiedTableName tableName)
     {
         requireNonNull(identity, "identity is null");
         requireNonNull(privilege, "privilege is null");
 
         ConnectorAccessControl accessControl = catalogAccessControl.get(tableName.getCatalogName());
         if (accessControl != null) {
-            accessControl.checkCanGrantTablePrivilege(identity, new Privilege(privilege.getTypeString()), tableName.asSchemaTableName());
+            accessControl.checkCanGrantTablePrivilege(identity, privilege, tableName.asSchemaTableName());
         }
     }
 
