@@ -510,6 +510,19 @@
             </dependency>
 
             <dependency>
+                <groupId>com.teradata.driver</groupId>
+                <artifactId>terajdbc</artifactId>
+                <version>4</version>
+            </dependency>
+
+            <dependency>
+                <groupId>com.teradata.driver</groupId>
+                <artifactId>tdgssconfig</artifactId>
+                <version>4</version>
+                <scope>runtime</scope>
+            </dependency>
+
+            <dependency>
                 <groupId>org.antlr</groupId>
                 <artifactId>antlr4-runtime</artifactId>
                 <version>${dep.antlr.version}</version>
