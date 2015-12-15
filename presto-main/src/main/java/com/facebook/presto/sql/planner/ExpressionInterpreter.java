@@ -14,6 +14,7 @@
 package com.facebook.presto.sql.planner;
 
 import com.facebook.presto.Session;
+import com.facebook.presto.client.FailureInfo;
 import com.facebook.presto.metadata.FunctionRegistry;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.OperatorType;
@@ -68,14 +69,18 @@ import com.facebook.presto.sql.tree.StringLiteral;
 import com.facebook.presto.sql.tree.SubscriptExpression;
 import com.facebook.presto.sql.tree.WhenClause;
 import com.facebook.presto.type.LikeFunctions;
+import com.facebook.presto.util.Failures;
 import com.facebook.presto.util.FastutilSetHelper;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Functions;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import io.airlift.joni.Regex;
+import io.airlift.json.JsonCodec;
 import io.airlift.slice.Slice;
+import org.jetbrains.annotations.NotNull;
 
 import java.lang.invoke.MethodHandle;
 import java.util.ArrayList;
@@ -98,7 +103,6 @@ import static com.google.common.base.Preconditions.checkState;
 import static com.google.common.base.Predicates.instanceOf;
 import static com.google.common.base.Verify.verify;
 import static com.google.common.collect.Iterables.any;
-import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Objects.requireNonNull;
 
 public class ExpressionInterpreter
@@ -399,8 +403,9 @@ public class ExpressionInterpreter
             }
             catch (RuntimeException e) {
                 // HACK
-                // Certain operations like 0 / 0 or likeExpression may throw exceptions
-                return expression;
+                // Certain operations like 0 / 0 or likeExpression may throw exceptions.
+                // Wrap them a FunctionCall that will throw the exception if the expression is actually executed
+                return createFailureFunction(e, type(expression));
             }
         }
 
@@ -851,7 +856,7 @@ public class ExpressionInterpreter
 
             // if pattern is a constant without % or _ replace with a comparison
             if (pattern instanceof Slice && escape == null) {
-                String stringPattern = ((Slice) pattern).toString(UTF_8);
+                String stringPattern = ((Slice) pattern).toStringUtf8();
                 if (!stringPattern.contains("%") && !stringPattern.contains("_")) {
                     return new ComparisonExpression(ComparisonExpression.Type.EQUAL,
                             toExpression(value, expressionTypes.get(node.getValue())),
@@ -1032,6 +1037,19 @@ public class ExpressionInterpreter
             }
             throw Throwables.propagate(throwable);
         }
+    }
+
+    @VisibleForTesting
+    @NotNull
+    public static Expression createFailureFunction(RuntimeException exception, Type type)
+    {
+        requireNonNull(exception, "Exception is null");
+
+        String failureInfo = JsonCodec.jsonCodec(FailureInfo.class).toJson(Failures.toFailure(exception).toFailureInfo());
+        FunctionCall jsonParse = new FunctionCall(QualifiedName.of("json_parse"), ImmutableList.of(new StringLiteral(failureInfo)));
+        FunctionCall failureFunction = new FunctionCall(QualifiedName.of("fail"), ImmutableList.of(jsonParse));
+
+        return new Cast(failureFunction, type.getTypeSignature().toString());
     }
 
     private static boolean isArray(Type type)
