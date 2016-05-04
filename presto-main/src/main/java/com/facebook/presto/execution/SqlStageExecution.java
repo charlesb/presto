@@ -16,6 +16,7 @@ package com.facebook.presto.execution;
 import com.facebook.presto.OutputBuffers;
 import com.facebook.presto.Session;
 import com.facebook.presto.execution.StateMachine.StateChangeListener;
+import com.facebook.presto.metadata.RemoteTransactionHandle;
 import com.facebook.presto.metadata.Split;
 import com.facebook.presto.spi.Node;
 import com.facebook.presto.spi.PrestoException;
@@ -63,6 +64,7 @@ public final class SqlStageExecution
     private final StageStateMachine stateMachine;
     private final RemoteTaskFactory remoteTaskFactory;
     private final NodeTaskMap nodeTaskMap;
+    private final boolean summarizeTaskInfo;
 
     private final Map<PlanFragmentId, RemoteSourceNode> exchangeSources;
 
@@ -83,6 +85,7 @@ public final class SqlStageExecution
             PlanFragment fragment,
             RemoteTaskFactory remoteTaskFactory,
             Session session,
+            boolean summarizeTaskInfo,
             NodeTaskMap nodeTaskMap,
             ExecutorService executor)
     {
@@ -93,14 +96,16 @@ public final class SqlStageExecution
                         requireNonNull(fragment, "fragment is null"),
                         requireNonNull(executor, "executor is null")),
                 remoteTaskFactory,
-                nodeTaskMap);
+                nodeTaskMap,
+                summarizeTaskInfo);
     }
 
-    public SqlStageExecution(StageStateMachine stateMachine, RemoteTaskFactory remoteTaskFactory, NodeTaskMap nodeTaskMap)
+    public SqlStageExecution(StageStateMachine stateMachine, RemoteTaskFactory remoteTaskFactory, NodeTaskMap nodeTaskMap, boolean summarizeTaskInfo)
     {
         this.stateMachine = stateMachine;
         this.remoteTaskFactory = requireNonNull(remoteTaskFactory, "remoteTaskFactory is null");
         this.nodeTaskMap = requireNonNull(nodeTaskMap, "nodeTaskMap is null");
+        this.summarizeTaskInfo = summarizeTaskInfo;
 
         ImmutableMap.Builder<PlanFragmentId, RemoteSourceNode> fragmentToExchangeSource = ImmutableMap.builder();
         for (RemoteSourceNode remoteSourceNode : stateMachine.getFragment().getRemoteSourceNodes()) {
@@ -248,7 +253,9 @@ public final class SqlStageExecution
         return !tasks.isEmpty();
     }
 
-    public synchronized List<RemoteTask> getAllTasks()
+    // do not synchronize
+    // this is used for query info building which should be independent of scheduling work
+    public List<RemoteTask> getAllTasks()
     {
         return tasks.values().stream()
                 .flatMap(Set::stream)
@@ -316,7 +323,8 @@ public final class SqlStageExecution
                 stateMachine.getFragment(),
                 initialSplits.build(),
                 outputBuffers.get(),
-                nodeTaskMap.createPartitionedSplitCountTracker(node, taskId));
+                nodeTaskMap.createPartitionedSplitCountTracker(node, taskId),
+                summarizeTaskInfo);
 
         completeSources.forEach(task::noMoreSplits);
 
@@ -324,37 +332,7 @@ public final class SqlStageExecution
         tasks.computeIfAbsent(node, key -> newConcurrentHashSet()).add(task);
         nodeTaskMap.addTask(node, task);
 
-        task.addStateChangeListener(taskInfo -> {
-            StageState stageState = getState();
-            if (stageState.isDone()) {
-                return;
-            }
-
-            TaskState taskState = taskInfo.getState();
-            if (taskState == TaskState.FAILED) {
-                RuntimeException failure = taskInfo.getFailures().stream()
-                        .findFirst()
-                        .map(ExecutionFailureInfo::toException)
-                        .orElse(new PrestoException(StandardErrorCode.INTERNAL_ERROR, "A task failed for an unknown reason"));
-                stateMachine.transitionToFailed(failure);
-            }
-            else if (taskState == TaskState.ABORTED) {
-                // A task should only be in the aborted state if the STAGE is done (ABORTED or FAILED)
-                stateMachine.transitionToFailed(new PrestoException(StandardErrorCode.INTERNAL_ERROR, "A task is in the ABORTED state but stage is " + stageState));
-            }
-            else if (taskState == TaskState.FINISHED) {
-                finishedTasks.add(task.getTaskId());
-            }
-
-            if (stageState == StageState.SCHEDULED || stageState == StageState.RUNNING) {
-                if (taskState == TaskState.RUNNING) {
-                    stateMachine.transitionToRunning();
-                }
-                if (finishedTasks.containsAll(allTasks)) {
-                    stateMachine.transitionToFinished();
-                }
-            }
-        });
+        task.addStateChangeListener(new StageTaskListener());
 
         if (!stateMachine.getState().isDone()) {
             task.start();
@@ -380,13 +358,63 @@ public final class SqlStageExecution
     private static Split createRemoteSplitFor(TaskId taskId, URI taskLocation)
     {
         URI splitLocation = uriBuilderFrom(taskLocation).appendPath("results").appendPath(taskId.toString()).build();
-        return new Split("remote", new RemoteSplit(splitLocation));
+        return new Split("remote", new RemoteTransactionHandle(), new RemoteSplit(splitLocation));
     }
 
     @Override
     public String toString()
     {
         return stateMachine.toString();
+    }
+
+    private class StageTaskListener
+            implements StateChangeListener<TaskInfo>
+    {
+        private long previousMemory;
+
+        @Override
+        public void stateChanged(TaskInfo taskInfo)
+        {
+            updateMemoryUsage(taskInfo);
+
+            StageState stageState = getState();
+            if (stageState.isDone()) {
+                return;
+            }
+
+            TaskState taskState = taskInfo.getState();
+            if (taskState == TaskState.FAILED) {
+                RuntimeException failure = taskInfo.getFailures().stream()
+                        .findFirst()
+                        .map(ExecutionFailureInfo::toException)
+                        .orElse(new PrestoException(StandardErrorCode.INTERNAL_ERROR, "A task failed for an unknown reason"));
+                stateMachine.transitionToFailed(failure);
+            }
+            else if (taskState == TaskState.ABORTED) {
+                // A task should only be in the aborted state if the STAGE is done (ABORTED or FAILED)
+                stateMachine.transitionToFailed(new PrestoException(StandardErrorCode.INTERNAL_ERROR, "A task is in the ABORTED state but stage is " + stageState));
+            }
+            else if (taskState == TaskState.FINISHED) {
+                finishedTasks.add(taskInfo.getTaskId());
+            }
+
+            if (stageState == StageState.SCHEDULED || stageState == StageState.RUNNING) {
+                if (taskState == TaskState.RUNNING) {
+                    stateMachine.transitionToRunning();
+                }
+                if (finishedTasks.containsAll(allTasks)) {
+                    stateMachine.transitionToFinished();
+                }
+            }
+        }
+
+        private synchronized void updateMemoryUsage(TaskInfo taskInfo)
+        {
+            long currentMemory = taskInfo.getStats().getMemoryReservation().toBytes();
+            long deltaMemoryInBytes = currentMemory - previousMemory;
+            previousMemory = currentMemory;
+            stateMachine.updateMemoryUsage(deltaMemoryInBytes);
+        }
     }
 
     public static class ExchangeLocation

@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.sql.tree;
 
+import java.util.Objects;
 import java.util.Optional;
 
 public class SubqueryExpression
@@ -30,7 +31,7 @@ public class SubqueryExpression
         this(Optional.of(location), query);
     }
 
-    private SubqueryExpression(Optional<NodeLocation> location, Query query)
+    protected SubqueryExpression(Optional<NodeLocation> location, Query query)
     {
         super(location);
         this.query = query;
@@ -58,12 +59,7 @@ public class SubqueryExpression
         }
 
         SubqueryExpression that = (SubqueryExpression) o;
-
-        if (!query.equals(that.query)) {
-            return false;
-        }
-
-        return true;
+        return Objects.equals(query, that.query);
     }
 
     @Override

@@ -18,6 +18,7 @@ import com.facebook.presto.spi.PageBuilder;
 import com.facebook.presto.spi.PrestoException;
 import com.facebook.presto.spi.block.Block;
 import com.facebook.presto.spi.block.BlockBuilder;
+import com.facebook.presto.spi.block.DictionaryBlock;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.gen.JoinCompiler;
 import com.facebook.presto.util.array.LongBigArray;
@@ -37,6 +38,7 @@ import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.sql.gen.JoinCompiler.PagesHashStrategyFactory;
 import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.base.Verify.verify;
 import static io.airlift.slice.SizeOf.sizeOf;
 import static it.unimi.dsi.fastutil.HashCommon.arraySize;
 import static it.unimi.dsi.fastutil.HashCommon.murmurHash3;
@@ -50,13 +52,16 @@ public class MultiChannelGroupByHash
 
     private static final float FILL_RATIO = 0.75f;
     private final List<Type> types;
+    private final List<Type> hashTypes;
     private final int[] channels;
 
     private final PagesHashStrategy hashStrategy;
     private final List<ObjectArrayList<Block>> channelBuilders;
+    private final Optional<Integer> inputHashChannel;
     private final HashGenerator hashGenerator;
     private final Optional<Integer> precomputedHashChannel;
     private final int maskChannel;
+    private final boolean processDictionary;
     private PageBuilder currentPageBuilder;
 
     private long completedPagesMemorySize;
@@ -65,22 +70,33 @@ public class MultiChannelGroupByHash
     private int mask;
     private long[] groupAddressByHash;
     private int[] groupIdsByHash;
+    private byte[] rawHashByHashPosition;
 
     private final LongBigArray groupAddressByGroupId;
 
     private int nextGroupId;
+    private DictionaryLookBack dictionaryLookBack;
 
-    public MultiChannelGroupByHash(List<? extends Type> hashTypes, int[] hashChannels, Optional<Integer> maskChannel, Optional<Integer> inputHashChannel, int expectedSize)
+    public MultiChannelGroupByHash(
+            List<? extends Type> hashTypes,
+            int[] hashChannels,
+            Optional<Integer> maskChannel,
+            Optional<Integer> inputHashChannel,
+            int expectedSize,
+            boolean processDictionary)
     {
-        requireNonNull(hashTypes, "hashTypes is null");
+        this.hashTypes = ImmutableList.copyOf(requireNonNull(hashTypes, "hashTypes is null"));
+
         checkArgument(hashTypes.size() == hashChannels.length, "hashTypes and hashChannels have different sizes");
-        requireNonNull(inputHashChannel, "inputHashChannel is null");
         checkArgument(expectedSize > 0, "expectedSize must be greater than zero");
 
-        this.types = inputHashChannel.isPresent() ? ImmutableList.copyOf(Iterables.concat(hashTypes, ImmutableList.of(BIGINT))) : ImmutableList.copyOf(hashTypes);
+        this.inputHashChannel = requireNonNull(inputHashChannel, "inputHashChannel is null");
+        this.types = inputHashChannel.isPresent() ? ImmutableList.copyOf(Iterables.concat(hashTypes, ImmutableList.of(BIGINT))) : this.hashTypes;
         this.channels = requireNonNull(hashChannels, "hashChannels is null").clone();
         this.maskChannel = requireNonNull(maskChannel, "maskChannel is null").orElse(-1);
-        this.hashGenerator = inputHashChannel.isPresent() ? new PrecomputedHashGenerator(inputHashChannel.get()) : new InterpretedHashGenerator(ImmutableList.copyOf(hashTypes), hashChannels);
+
+        this.hashGenerator = inputHashChannel.isPresent() ? new PrecomputedHashGenerator(inputHashChannel.get()) : new InterpretedHashGenerator(this.hashTypes, hashChannels);
+        this.processDictionary = processDictionary;
 
         // For each hashed channel, create an appendable list to hold the blocks (builders).  As we
         // add new values we append them to the existing block builder until it fills up and then
@@ -111,6 +127,8 @@ public class MultiChannelGroupByHash
         mask = hashSize - 1;
         groupAddressByHash = new long[hashSize];
         Arrays.fill(groupAddressByHash, -1);
+
+        rawHashByHashPosition = new byte[hashSize];
 
         groupIdsByHash = new int[hashSize];
 
@@ -158,6 +176,11 @@ public class MultiChannelGroupByHash
             maskBlock = page.getBlock(maskChannel);
         }
 
+        if (canProcessDictionary(page)) {
+            addDictionaryPage(page);
+            return;
+        }
+
         // get the group id for each position
         int positionCount = page.getPositionCount();
         for (int position = 0; position < positionCount; position++) {
@@ -184,6 +207,11 @@ public class MultiChannelGroupByHash
             maskBlock = page.getBlock(maskChannel);
         }
 
+        if (canProcessDictionary(page)) {
+            Block groupIds = processDictionary(page);
+            return new GroupByIdBlock(nextGroupId, groupIds);
+        }
+
         // get the group id for each position
         for (int position = 0; position < positionCount; position++) {
             // skip masked rows
@@ -204,13 +232,12 @@ public class MultiChannelGroupByHash
     @Override
     public boolean contains(int position, Page page, int[] hashChannels)
     {
-        int rawHash = hashStrategy.hashRow(position, page.getBlocks());
-        int hashPosition = getHashPosition(rawHash, mask);
+        long rawHash = hashStrategy.hashRow(position, page.getBlocks());
+        int hashPosition = (int) getHashPosition(rawHash, mask);
 
         // look for a slot containing this key
         while (groupAddressByHash[hashPosition] != -1) {
-            long address = groupAddressByHash[hashPosition];
-            if (hashStrategy.positionEqualsRow(decodeSliceIndex(address), decodePosition(address), position, page, hashChannels)) {
+            if (positionEqualsCurrentRow(groupAddressByHash[hashPosition], hashPosition, position, page, (byte) rawHash, hashChannels)) {
                 // found an existing slot for this key
                 return true;
             }
@@ -224,14 +251,18 @@ public class MultiChannelGroupByHash
     @Override
     public int putIfAbsent(int position, Page page)
     {
-        int rawHash = hashGenerator.hashPosition(position, page);
-        int hashPosition = getHashPosition(rawHash, mask);
+        long rawHash = hashGenerator.hashPosition(position, page);
+        return putIfAbsent(position, page, rawHash);
+    }
+
+    private int putIfAbsent(int position, Page page, long rawHash)
+    {
+        int hashPosition = (int) getHashPosition(rawHash, mask);
 
         // look for an empty slot or a slot containing this key
         int groupId = -1;
         while (groupAddressByHash[hashPosition] != -1) {
-            long address = groupAddressByHash[hashPosition];
-            if (positionEqualsCurrentRow(decodeSliceIndex(address), decodePosition(address), position, page)) {
+            if (positionEqualsCurrentRow(groupAddressByHash[hashPosition], hashPosition, position, page, (byte) rawHash, channels)) {
                 // found an existing slot for this key
                 groupId = groupIdsByHash[hashPosition];
 
@@ -248,7 +279,7 @@ public class MultiChannelGroupByHash
         return groupId;
     }
 
-    private int addNewGroup(int hashPosition, int position, Page page, int rawHash)
+    private int addNewGroup(int hashPosition, int position, Page page, long rawHash)
     {
         // add the row to the open page
         Block[] blocks = page.getBlocks();
@@ -269,6 +300,7 @@ public class MultiChannelGroupByHash
         int groupId = nextGroupId++;
 
         groupAddressByHash[hashPosition] = address;
+        rawHashByHashPosition[hashPosition] = (byte) rawHash;
         groupIdsByHash[hashPosition] = groupId;
         groupAddressByGroupId.set(groupId, address);
 
@@ -306,6 +338,7 @@ public class MultiChannelGroupByHash
 
         int newMask = newCapacity - 1;
         long[] newKey = new long[newCapacity];
+        byte[] rawHashes = new byte[newCapacity];
         Arrays.fill(newKey, -1);
         int[] newValue = new int[newCapacity];
 
@@ -319,14 +352,16 @@ public class MultiChannelGroupByHash
             // get the address for this slot
             long address = groupAddressByHash[oldIndex];
 
+            long rawHash = hashPosition(address);
             // find an empty slot for the address
-            int pos = getHashPosition(hashPosition(address), newMask);
+            int pos = (int) getHashPosition(rawHash, newMask);
             while (newKey[pos] != -1) {
                 pos = (pos + 1) & newMask;
             }
 
             // record the mapping
             newKey[pos] = address;
+            rawHashes[pos] = (byte) rawHash;
             newValue[pos] = groupIdsByHash[oldIndex];
             oldIndex++;
         }
@@ -334,11 +369,12 @@ public class MultiChannelGroupByHash
         this.mask = newMask;
         this.maxFill = calculateMaxFill(newCapacity);
         this.groupAddressByHash = newKey;
+        this.rawHashByHashPosition = rawHashes;
         this.groupIdsByHash = newValue;
         groupAddressByGroupId.ensureCapacity(maxFill);
     }
 
-    private int hashPosition(long sliceAddress)
+    private long hashPosition(long sliceAddress)
     {
         int sliceIndex = decodeSliceIndex(sliceAddress);
         int position = decodePosition(sliceAddress);
@@ -348,17 +384,20 @@ public class MultiChannelGroupByHash
         return hashStrategy.hashPosition(sliceIndex, position);
     }
 
-    private int getRawHash(int sliceIndex, int position)
+    private long getRawHash(int sliceIndex, int position)
     {
-        return (int) channelBuilders.get(precomputedHashChannel.get()).get(sliceIndex).getLong(position, 0);
+        return channelBuilders.get(precomputedHashChannel.get()).get(sliceIndex).getLong(position, 0);
     }
 
-    private boolean positionEqualsCurrentRow(int sliceIndex, int slicePosition, int position, Page page)
+    private boolean positionEqualsCurrentRow(long address, int hashPosition, int position, Page page, byte rawHash, int[] hashChannels)
     {
-        return hashStrategy.positionEqualsRow(sliceIndex, slicePosition, position, page, channels);
+        if (rawHashByHashPosition[hashPosition] != rawHash) {
+            return false;
+        }
+        return hashStrategy.positionEqualsRow(decodeSliceIndex(address), decodePosition(address), position, page, hashChannels);
     }
 
-    private static int getHashPosition(int rawHash, int mask)
+    private static long getHashPosition(long rawHash, int mask)
     {
         return murmurHash3(rawHash) & mask;
     }
@@ -372,5 +411,126 @@ public class MultiChannelGroupByHash
         }
         checkArgument(hashSize > maxFill, "hashSize must be larger than maxFill");
         return maxFill;
+    }
+
+    private void addDictionaryPage(Page page)
+    {
+        verify(canProcessDictionary(page), "invalid call to addDictionaryPage");
+
+        DictionaryBlock dictionaryBlock = (DictionaryBlock) page.getBlock(channels[0]);
+        updateDictionaryLookBack(dictionaryBlock.getDictionary());
+        Page dictionaryPage = createPageWithExtractedDictionary(page);
+
+        for (int i = 0; i < page.getPositionCount(); i++) {
+            int positionInDictionary = dictionaryBlock.getId(i);
+            getGroupId(hashGenerator, dictionaryPage, positionInDictionary);
+        }
+    }
+
+    private void updateDictionaryLookBack(Block dictionary)
+    {
+        if (dictionaryLookBack == null || dictionaryLookBack.getDictionary() != dictionary) {
+            dictionaryLookBack = new DictionaryLookBack(dictionary);
+        }
+    }
+
+    private Block processDictionary(Page page)
+    {
+        verify(canProcessDictionary(page), "invalid call to processDictionary");
+
+        DictionaryBlock dictionaryBlock = (DictionaryBlock) page.getBlock(channels[0]);
+        updateDictionaryLookBack(dictionaryBlock.getDictionary());
+        Page dictionaryPage = createPageWithExtractedDictionary(page);
+
+        BlockBuilder blockBuilder = BIGINT.createFixedSizeBlockBuilder(page.getPositionCount());
+        for (int i = 0; i < page.getPositionCount(); i++) {
+            int positionInDictionary = dictionaryBlock.getId(i);
+            int groupId = getGroupId(hashGenerator, dictionaryPage, positionInDictionary);
+            BIGINT.writeLong(blockBuilder, groupId);
+        }
+
+        verify(blockBuilder.getPositionCount() == page.getPositionCount(), "invalid position count");
+        return blockBuilder.build();
+    }
+
+    // For a page that contains DictionaryBlocks, create a new page in which
+    // the dictionaries from the DictionaryBlocks are extracted into the corresponding channels
+    // From Page(DictionaryBlock1, DictionaryBlock2) create new page with Page(dictionary1, dictionary2)
+    private Page createPageWithExtractedDictionary(Page page)
+    {
+        Block[] blocks = new Block[page.getChannelCount()];
+        Block dictionary = ((DictionaryBlock) page.getBlock(channels[0])).getDictionary();
+
+        // extract data dictionary
+        blocks[channels[0]] = dictionary;
+
+        // extract hash dictionary
+        if (inputHashChannel.isPresent()) {
+            blocks[inputHashChannel.get()] = ((DictionaryBlock) page.getBlock(inputHashChannel.get())).getDictionary();
+        }
+
+        return new Page(dictionary.getPositionCount(), blocks);
+    }
+
+    private boolean canProcessDictionary(Page page)
+    {
+        boolean processDictionary = this.processDictionary &&
+                maskChannel < 0 &&
+                channels.length == 1 &&
+                page.getBlock(channels[0]) instanceof DictionaryBlock;
+
+        if (processDictionary && inputHashChannel.isPresent()) {
+            Block inputHashBlock = page.getBlock(inputHashChannel.get());
+            DictionaryBlock inputDataBlock = (DictionaryBlock) page.getBlock(channels[0]);
+
+            verify(inputHashBlock instanceof DictionaryBlock, "data channel is dictionary encoded but hash channel is not");
+            verify(((DictionaryBlock) inputHashBlock).getDictionarySourceId().equals(inputDataBlock.getDictionarySourceId()),
+                    "dictionarySourceIds of data block and hash block do not match");
+        }
+        return processDictionary;
+    }
+
+    private int getGroupId(HashGenerator hashGenerator, Page page, int positionInDictionary)
+    {
+        if (dictionaryLookBack.isProcessed(positionInDictionary)) {
+            return dictionaryLookBack.getGroupId(positionInDictionary);
+        }
+
+        int groupId = putIfAbsent(positionInDictionary, page, hashGenerator.hashPosition(positionInDictionary, page));
+        dictionaryLookBack.setProcessed(positionInDictionary, groupId);
+        return groupId;
+    }
+
+    private static final class DictionaryLookBack
+    {
+        private final Block dictionary;
+        private final int[] processed;
+
+        public DictionaryLookBack(Block dictionary)
+        {
+            this.dictionary = dictionary;
+            this.processed = new int[dictionary.getPositionCount()];
+            Arrays.fill(processed, -1);
+        }
+
+        public Block getDictionary()
+        {
+            return dictionary;
+        }
+
+        public int getGroupId(int position)
+        {
+            return processed[position];
+        }
+
+        public boolean isProcessed(int position)
+        {
+            return processed[position] != -1;
+        }
+
+        public void setProcessed(int position, int groupId)
+        {
+            processed[position] = groupId;
+        }
     }
 }

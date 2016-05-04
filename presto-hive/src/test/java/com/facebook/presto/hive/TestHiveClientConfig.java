@@ -69,6 +69,7 @@ public class TestHiveClientConfig
                 .setImmutablePartitions(false)
                 .setMaxPartitionsPerWriter(100)
                 .setUseParquetColumnNames(false)
+                .setUseOrcColumnNames(false)
                 .setS3AwsAccessKey(null)
                 .setS3AwsSecretKey(null)
                 .setS3UseInstanceCredentials(true)
@@ -91,7 +92,15 @@ public class TestHiveClientConfig
                 .setAssumeCanonicalPartitionKeys(false)
                 .setOrcMaxMergeDistance(new DataSize(1, Unit.MEGABYTE))
                 .setOrcMaxBufferSize(new DataSize(8, Unit.MEGABYTE))
-                .setOrcStreamBufferSize(new DataSize(8, Unit.MEGABYTE)));
+                .setOrcStreamBufferSize(new DataSize(8, Unit.MEGABYTE))
+                .setHiveMetastoreAuthenticationType(HiveClientConfig.HiveMetastoreAuthenticationType.SIMPLE)
+                .setHiveMetastorePrincipal(null)
+                .setHiveMetastorePrestoPrincipal(null)
+                .setHiveMetastorePrestoKeytab(null)
+                .setHdfsAuthenticationType(HiveClientConfig.HdfsAuthenticationType.SIMPLE)
+                .setHdfsPrestoPrincipal(null)
+                .setHdfsPrestoKeytab(null)
+                .setHdfsTemporaryDirectoryTemplate("/tmp"));
     }
 
     @Test
@@ -132,6 +141,7 @@ public class TestHiveClientConfig
                 .put("hive.max-concurrent-file-renames", "100")
                 .put("hive.assume-canonical-partition-keys", "true")
                 .put("hive.parquet.use-column-names", "true")
+                .put("hive.orc.use-column-names", "true")
                 .put("hive.s3.aws-access-key", "abc123")
                 .put("hive.s3.aws-secret-key", "secret")
                 .put("hive.s3.use-instance-credentials", "false")
@@ -154,6 +164,14 @@ public class TestHiveClientConfig
                 .put("hive.orc.max-merge-distance", "22kB")
                 .put("hive.orc.max-buffer-size", "44kB")
                 .put("hive.orc.stream-buffer-size", "55kB")
+                .put("hive.metastore.authentication.type", "SASL")
+                .put("hive.metastore.principal", "hive/_HOST@EXAMPLE.COM")
+                .put("hive.metastore.presto.principal", "metastore@EXAMPLE.COM")
+                .put("hive.metastore.presto.keytab", "/tmp/metastore.keytab")
+                .put("hive.hdfs.authentication.type", "KERBEROS")
+                .put("hive.hdfs.presto.principal", "hdfs@EXAMPLE.COM")
+                .put("hive.hdfs.presto.keytab", "/tmp/hdfs.keytab")
+                .put("hive.hdfs.temporary.directory", "/example/temporary/dir")
                 .build();
 
         HiveClientConfig expected = new HiveClientConfig()
@@ -190,6 +208,7 @@ public class TestHiveClientConfig
                 .setMaxPartitionsPerWriter(222)
                 .setDomainSocketPath("/foo")
                 .setUseParquetColumnNames(true)
+                .setUseOrcColumnNames(true)
                 .setS3AwsAccessKey("abc123")
                 .setS3AwsSecretKey("secret")
                 .setS3UseInstanceCredentials(false)
@@ -212,7 +231,15 @@ public class TestHiveClientConfig
                 .setAssumeCanonicalPartitionKeys(true)
                 .setOrcMaxMergeDistance(new DataSize(22, Unit.KILOBYTE))
                 .setOrcMaxBufferSize(new DataSize(44, Unit.KILOBYTE))
-                .setOrcStreamBufferSize(new DataSize(55, Unit.KILOBYTE));
+                .setOrcStreamBufferSize(new DataSize(55, Unit.KILOBYTE))
+                .setHiveMetastoreAuthenticationType(HiveClientConfig.HiveMetastoreAuthenticationType.SASL)
+                .setHiveMetastorePrincipal("hive/_HOST@EXAMPLE.COM")
+                .setHiveMetastorePrestoPrincipal("metastore@EXAMPLE.COM")
+                .setHiveMetastorePrestoKeytab("/tmp/metastore.keytab")
+                .setHdfsAuthenticationType(HiveClientConfig.HdfsAuthenticationType.KERBEROS)
+                .setHdfsPrestoPrincipal("hdfs@EXAMPLE.COM")
+                .setHdfsPrestoKeytab("/tmp/hdfs.keytab")
+                .setHdfsTemporaryDirectoryTemplate("/example/temporary/dir");
 
         ConfigAssertions.assertFullMapping(properties, expected);
     }

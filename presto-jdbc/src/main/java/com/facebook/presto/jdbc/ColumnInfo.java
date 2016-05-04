@@ -14,6 +14,7 @@
 package com.facebook.presto.jdbc;
 
 import com.facebook.presto.spi.type.TypeSignature;
+import com.facebook.presto.spi.type.TypeSignatureParameter;
 import com.google.common.collect.ImmutableList;
 
 import java.sql.Types;
@@ -88,7 +89,7 @@ class ColumnInfo
     {
         builder.setColumnType(getType(type));
         ImmutableList.Builder<Integer> parameterTypes = ImmutableList.builder();
-        for (TypeSignature parameter : type.getParameters()) {
+        for (TypeSignatureParameter parameter : type.getParameters()) {
             parameterTypes.add(getType(parameter));
         }
         builder.setColumnParameterTypes(parameterTypes.build());
@@ -155,6 +156,22 @@ class ColumnInfo
             case "interval day to second":
                 builder.setColumnDisplaySize(TIMESTAMP_MAX);
                 break;
+            case "decimal":
+                builder.setSigned(true);
+                builder.setColumnDisplaySize(type.getParameters().get(0).getLongLiteral().intValue() + 2); // dot and sign
+                builder.setPrecision(type.getParameters().get(0).getLongLiteral().intValue());
+                builder.setScale(type.getParameters().get(1).getLongLiteral().intValue());
+                break;
+        }
+    }
+
+    private static int getType(TypeSignatureParameter typeParameter)
+    {
+        switch (typeParameter.getKind()) {
+            case TYPE:
+                return getType(typeParameter.getTypeSignature());
+            default:
+                return Types.JAVA_OBJECT;
         }
     }
 
@@ -163,7 +180,7 @@ class ColumnInfo
         if (type.getBase().equals("array")) {
             return Types.ARRAY;
         }
-        switch (type.toString()) {
+        switch (type.getBase()) {
             case "boolean":
                 return Types.BOOLEAN;
             case "bigint":
@@ -184,6 +201,8 @@ class ColumnInfo
                 return Types.TIMESTAMP;
             case "date":
                 return Types.DATE;
+            case "decimal":
+                return Types.DECIMAL;
             default:
                 return Types.JAVA_OBJECT;
         }

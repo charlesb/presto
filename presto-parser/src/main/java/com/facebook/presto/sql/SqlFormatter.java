@@ -17,32 +17,44 @@ import com.facebook.presto.sql.tree.AddColumn;
 import com.facebook.presto.sql.tree.AliasedRelation;
 import com.facebook.presto.sql.tree.AllColumns;
 import com.facebook.presto.sql.tree.AstVisitor;
+import com.facebook.presto.sql.tree.Call;
+import com.facebook.presto.sql.tree.CallArgument;
+import com.facebook.presto.sql.tree.Commit;
 import com.facebook.presto.sql.tree.CreateTable;
 import com.facebook.presto.sql.tree.CreateTableAsSelect;
 import com.facebook.presto.sql.tree.CreateView;
+import com.facebook.presto.sql.tree.Deallocate;
 import com.facebook.presto.sql.tree.Delete;
+import com.facebook.presto.sql.tree.DescribeInput;
+import com.facebook.presto.sql.tree.DescribeOutput;
 import com.facebook.presto.sql.tree.DropTable;
 import com.facebook.presto.sql.tree.DropView;
 import com.facebook.presto.sql.tree.Except;
+import com.facebook.presto.sql.tree.Execute;
 import com.facebook.presto.sql.tree.Explain;
 import com.facebook.presto.sql.tree.ExplainFormat;
 import com.facebook.presto.sql.tree.ExplainOption;
 import com.facebook.presto.sql.tree.ExplainType;
 import com.facebook.presto.sql.tree.Expression;
+import com.facebook.presto.sql.tree.Grant;
 import com.facebook.presto.sql.tree.Insert;
 import com.facebook.presto.sql.tree.Intersect;
+import com.facebook.presto.sql.tree.Isolation;
 import com.facebook.presto.sql.tree.Join;
 import com.facebook.presto.sql.tree.JoinCriteria;
 import com.facebook.presto.sql.tree.JoinOn;
 import com.facebook.presto.sql.tree.JoinUsing;
+import com.facebook.presto.sql.tree.Literal;
 import com.facebook.presto.sql.tree.NaturalJoin;
 import com.facebook.presto.sql.tree.Node;
+import com.facebook.presto.sql.tree.Prepare;
 import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.QuerySpecification;
 import com.facebook.presto.sql.tree.Relation;
 import com.facebook.presto.sql.tree.RenameColumn;
 import com.facebook.presto.sql.tree.RenameTable;
 import com.facebook.presto.sql.tree.ResetSession;
+import com.facebook.presto.sql.tree.Rollback;
 import com.facebook.presto.sql.tree.SampledRelation;
 import com.facebook.presto.sql.tree.Select;
 import com.facebook.presto.sql.tree.SelectItem;
@@ -55,8 +67,11 @@ import com.facebook.presto.sql.tree.ShowSchemas;
 import com.facebook.presto.sql.tree.ShowSession;
 import com.facebook.presto.sql.tree.ShowTables;
 import com.facebook.presto.sql.tree.SingleColumn;
+import com.facebook.presto.sql.tree.StartTransaction;
 import com.facebook.presto.sql.tree.Table;
 import com.facebook.presto.sql.tree.TableSubquery;
+import com.facebook.presto.sql.tree.TransactionAccessMode;
+import com.facebook.presto.sql.tree.TransactionMode;
 import com.facebook.presto.sql.tree.Union;
 import com.facebook.presto.sql.tree.Unnest;
 import com.facebook.presto.sql.tree.Values;
@@ -68,6 +83,7 @@ import com.google.common.base.Strings;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static com.facebook.presto.sql.ExpressionFormatter.formatExpression;
 import static com.facebook.presto.sql.ExpressionFormatter.formatGroupBy;
@@ -127,6 +143,55 @@ public final class SqlFormatter
         protected Void visitUnnest(Unnest node, Integer indent)
         {
             builder.append(node.toString());
+            return null;
+        }
+
+        @Override
+        protected Void visitPrepare(Prepare node, Integer indent)
+        {
+            append(indent, "PREPARE ");
+            builder.append(node.getName());
+            builder.append(" FROM");
+            builder.append("\n");
+            process(node.getStatement(), indent + 1);
+            return null;
+        }
+
+        @Override
+        protected Void visitDeallocate(Deallocate node, Integer indent)
+        {
+            append(indent, "DEALLOCATE PREPARE ");
+            builder.append(node.getName());
+            return null;
+        }
+
+        @Override
+        protected Void visitExecute(Execute node, Integer indent)
+        {
+            append(indent, "EXECUTE ");
+            builder.append(node.getName());
+            List<Literal> parameters = node.getParameters();
+            if (!parameters.isEmpty()) {
+                builder.append(" USING ");
+                String parameterString = Joiner.on(", ").join(parameters);
+                builder.append(parameterString);
+            }
+            return null;
+        }
+
+        @Override
+        protected Void visitDescribeOutput(DescribeOutput node, Integer indent)
+        {
+            append(indent, "DESCRIBE OUTPUT ");
+            builder.append(node.getName());
+            return null;
+        }
+
+        @Override
+        protected Void visitDescribeInput(DescribeInput node, Integer indent)
+        {
+            append(indent, "DESCRIBE INPUT ");
+            builder.append(node.getName());
             return null;
         }
 
@@ -473,6 +538,9 @@ public final class SqlFormatter
         protected Void visitExplain(Explain node, Integer indent)
         {
             builder.append("EXPLAIN ");
+            if (node.isAnalyze()) {
+                builder.append("ANALYZE ");
+            }
 
             List<String> options = new ArrayList<>();
 
@@ -732,6 +800,109 @@ public final class SqlFormatter
         {
             builder.append("RESET SESSION ")
                     .append(node.getName());
+
+            return null;
+        }
+
+        @Override
+        protected Void visitCallArgument(CallArgument node, Integer indent)
+        {
+            if (node.getName().isPresent()) {
+                builder.append(node.getName().get())
+                        .append(" => ");
+            }
+            builder.append(formatExpression(node.getValue()));
+
+            return null;
+        }
+
+        @Override
+        protected Void visitCall(Call node, Integer indent)
+        {
+            builder.append("CALL ")
+                    .append(node.getName())
+                    .append("(");
+
+            Iterator<CallArgument> arguments = node.getArguments().iterator();
+            while (arguments.hasNext()) {
+                process(arguments.next(), indent);
+                if (arguments.hasNext()) {
+                    builder.append(", ");
+                }
+            }
+
+            builder.append(")");
+
+            return null;
+        }
+
+        @Override
+        protected Void visitStartTransaction(StartTransaction node, Integer indent)
+        {
+            builder.append("START TRANSACTION");
+
+            Iterator<TransactionMode> iterator = node.getTransactionModes().iterator();
+            while (iterator.hasNext()) {
+                builder.append(" ");
+                process(iterator.next(), indent);
+                if (iterator.hasNext()) {
+                    builder.append(",");
+                }
+            }
+            return null;
+        }
+
+        @Override
+        protected Void visitIsolationLevel(Isolation node, Integer indent)
+        {
+            builder.append("ISOLATION LEVEL ").append(node.getLevel().getText());
+            return null;
+        }
+
+        @Override
+        protected Void visitTransactionAccessMode(TransactionAccessMode node, Integer context)
+        {
+            builder.append(node.isReadOnly() ? "READ ONLY" : "READ WRITE");
+            return null;
+        }
+
+        @Override
+        protected Void visitCommit(Commit node, Integer context)
+        {
+            builder.append("COMMIT");
+            return null;
+        }
+
+        @Override
+        protected Void visitRollback(Rollback node, Integer context)
+        {
+            builder.append("ROLLBACK");
+            return null;
+        }
+
+        @Override
+        public Void visitGrant(Grant node, Integer indent)
+        {
+            builder.append("GRANT ");
+
+            if (node.getPrivileges().isPresent()) {
+                builder.append(node.getPrivileges().get().stream()
+                        .collect(Collectors.joining(", ")));
+            }
+            else {
+                builder.append("ALL PRIVILEGES");
+            }
+
+            builder.append(" ON ");
+            if (node.isTable()) {
+                builder.append("TABLE ");
+            }
+            builder.append(node.getTableName())
+                    .append(" TO ")
+                    .append(node.getGrantee());
+            if (node.isWithGrantOption()) {
+                builder.append(" WITH GRANT OPTION");
+            }
 
             return null;
         }

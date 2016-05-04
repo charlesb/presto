@@ -14,10 +14,12 @@
 package com.facebook.presto.tpch;
 
 import com.facebook.presto.spi.ColumnHandle;
-import com.facebook.presto.spi.ConnectorRecordSetProvider;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.ConnectorSplit;
 import com.facebook.presto.spi.RecordSet;
+import com.facebook.presto.spi.connector.ConnectorRecordSetProvider;
+import com.facebook.presto.spi.connector.ConnectorTransactionHandle;
+import com.facebook.presto.spi.type.TypeSignature;
 import com.google.common.collect.ImmutableList;
 import io.airlift.tpch.TpchColumn;
 import io.airlift.tpch.TpchColumnType;
@@ -26,6 +28,8 @@ import io.airlift.tpch.TpchTable;
 
 import java.util.List;
 
+import static com.facebook.presto.spi.type.StandardTypes.DOUBLE;
+import static com.facebook.presto.spi.type.TypeSignature.parseTypeSignature;
 import static com.facebook.presto.tpch.TpchRecordSet.createTpchRecordSet;
 import static com.facebook.presto.tpch.Types.checkType;
 import static io.airlift.tpch.TpchColumnType.BIGINT;
@@ -34,7 +38,7 @@ public class TpchRecordSetProvider
         implements ConnectorRecordSetProvider
 {
     @Override
-    public RecordSet getRecordSet(ConnectorSession session, ConnectorSplit split, List<? extends ColumnHandle> columns)
+    public RecordSet getRecordSet(ConnectorTransactionHandle transaction, ConnectorSession session, ConnectorSplit split, List<? extends ColumnHandle> columns)
     {
         TpchSplit tpchSplit = checkType(split, TpchSplit.class, "split");
 
@@ -42,13 +46,24 @@ public class TpchRecordSetProvider
 
         TpchTable<?> tpchTable = TpchTable.getTable(tableName);
 
-        return getRecordSet(tpchTable, columns, tpchSplit.getTableHandle().getScaleFactor(), tpchSplit.getPartNumber(), tpchSplit.getTotalParts());
+        return getRecordSet(tpchTable, columns, tpchSplit.getTableHandle().getScaleFactor(), tpchSplit.getTableHandle().getNumericTypeSignature(), tpchSplit.getPartNumber(), tpchSplit.getTotalParts());
     }
 
     public <E extends TpchEntity> RecordSet getRecordSet(
             TpchTable<E> table,
             List<? extends ColumnHandle> columns,
             double scaleFactor,
+            int partNumber,
+            int totalParts)
+    {
+        return getRecordSet(table, columns, scaleFactor, parseTypeSignature(DOUBLE), partNumber, totalParts);
+    }
+
+    public <E extends TpchEntity> RecordSet getRecordSet(
+            TpchTable<E> table,
+            List<? extends ColumnHandle> columns,
+            double scaleFactor,
+            TypeSignature numericTypeSignature,
             int partNumber,
             int totalParts)
     {
@@ -63,7 +78,7 @@ public class TpchRecordSetProvider
             }
         }
 
-        return createTpchRecordSet(table, builder.build(), scaleFactor, partNumber + 1, totalParts);
+        return createTpchRecordSet(table, builder.build(), scaleFactor, numericTypeSignature, partNumber + 1, totalParts);
     }
 
     private static class RowNumberTpchColumn<E extends TpchEntity>

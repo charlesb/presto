@@ -25,7 +25,6 @@ import org.antlr.v4.runtime.RecognitionException;
 import org.antlr.v4.runtime.Recognizer;
 import org.antlr.v4.runtime.Token;
 import org.antlr.v4.runtime.atn.PredictionMode;
-import org.antlr.v4.runtime.misc.NotNull;
 import org.antlr.v4.runtime.misc.Pair;
 import org.antlr.v4.runtime.misc.ParseCancellationException;
 
@@ -41,7 +40,7 @@ public class SqlParser
     private static final BaseErrorListener ERROR_LISTENER = new BaseErrorListener()
     {
         @Override
-        public void syntaxError(@NotNull Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int charPositionInLine, @NotNull String message, RecognitionException e)
+        public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int charPositionInLine, String message, RecognitionException e)
         {
             throw new ParsingException(message, e, line, charPositionInLine);
         }
@@ -61,17 +60,35 @@ public class SqlParser
         allowedIdentifierSymbols = EnumSet.copyOf(options.getAllowedIdentifierSymbols());
     }
 
+    /**
+     * Consider using {@link #createStatement(String, ParsingOptions)}
+     */
+    @Deprecated
     public Statement createStatement(String sql)
     {
-        return (Statement) invokeParser("statement", sql, SqlBaseParser::singleStatement);
+        return createStatement(sql, new ParsingOptions());
     }
 
+    public Statement createStatement(String sql, ParsingOptions parsingOptions)
+    {
+        return (Statement) invokeParser("statement", sql, SqlBaseParser::singleStatement, parsingOptions);
+    }
+
+    /**
+     * Consider using {@link #createExpression(String, ParsingOptions)}
+     */
+    @Deprecated
     public Expression createExpression(String expression)
     {
-        return (Expression) invokeParser("expression", expression, SqlBaseParser::singleExpression);
+        return createExpression(expression, new ParsingOptions());
     }
 
-    private Node invokeParser(String name, String sql, Function<SqlBaseParser, ParserRuleContext> parseFunction)
+    public Expression createExpression(String expression, ParsingOptions parsingOptions)
+    {
+        return (Expression) invokeParser("expression", expression, SqlBaseParser::singleExpression, parsingOptions);
+    }
+
+    private Node invokeParser(String name, String sql, Function<SqlBaseParser, ParserRuleContext> parseFunction, ParsingOptions parsingOptions)
     {
         try {
             SqlBaseLexer lexer = new SqlBaseLexer(new CaseInsensitiveStream(new ANTLRInputStream(sql)));
@@ -101,7 +118,7 @@ public class SqlParser
                 tree = parseFunction.apply(parser);
             }
 
-            return new AstBuilder().visit(tree);
+            return new AstBuilder(parsingOptions).visit(tree);
         }
         catch (StackOverflowError e) {
             throw new ParsingException(name + " is too large (stack overflow while parsing)");
@@ -112,7 +129,7 @@ public class SqlParser
             extends SqlBaseBaseListener
     {
         @Override
-        public void exitUnquotedIdentifier(@NotNull SqlBaseParser.UnquotedIdentifierContext context)
+        public void exitUnquotedIdentifier(SqlBaseParser.UnquotedIdentifierContext context)
         {
             String identifier = context.IDENTIFIER().getText();
             for (IdentifierSymbol identifierSymbol : EnumSet.complementOf(allowedIdentifierSymbols)) {
@@ -124,7 +141,7 @@ public class SqlParser
         }
 
         @Override
-        public void exitBackQuotedIdentifier(@NotNull SqlBaseParser.BackQuotedIdentifierContext context)
+        public void exitBackQuotedIdentifier(SqlBaseParser.BackQuotedIdentifierContext context)
         {
             Token token = context.BACKQUOTED_IDENTIFIER().getSymbol();
             throw new ParsingException(
@@ -135,7 +152,7 @@ public class SqlParser
         }
 
         @Override
-        public void exitDigitIdentifier(@NotNull SqlBaseParser.DigitIdentifierContext context)
+        public void exitDigitIdentifier(SqlBaseParser.DigitIdentifierContext context)
         {
             Token token = context.DIGIT_IDENTIFIER().getSymbol();
             throw new ParsingException(
@@ -146,7 +163,7 @@ public class SqlParser
         }
 
         @Override
-        public void exitQuotedIdentifier(@NotNull SqlBaseParser.QuotedIdentifierContext context)
+        public void exitQuotedIdentifier(SqlBaseParser.QuotedIdentifierContext context)
         {
             // Remove quotes
             context.getParent().removeLastChild();
@@ -161,7 +178,7 @@ public class SqlParser
         }
 
         @Override
-        public void exitNonReserved(@NotNull SqlBaseParser.NonReservedContext context)
+        public void exitNonReserved(SqlBaseParser.NonReservedContext context)
         {
             // replace nonReserved words with IDENT tokens
             context.getParent().removeLastChild();

@@ -19,14 +19,15 @@ import com.facebook.presto.metadata.Split;
 import com.facebook.presto.operator.index.PageRecordSet;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.ConnectorPageSource;
+import com.facebook.presto.spi.DefaultRecordPageSource;
 import com.facebook.presto.spi.FixedPageSource;
 import com.facebook.presto.spi.Page;
-import com.facebook.presto.spi.RecordPageSource;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.split.PageSourceProvider;
 import com.facebook.presto.sql.planner.plan.PlanNodeId;
 import com.facebook.presto.testing.MaterializedResult;
 import com.facebook.presto.testing.TestingSplit;
+import com.facebook.presto.testing.TestingTransactionHandle;
 import com.google.common.collect.ImmutableList;
 import org.testng.annotations.Test;
 
@@ -61,6 +62,7 @@ public class TestScanFilterAndProjectOperator
 
         ScanFilterAndProjectOperator.ScanFilterAndProjectOperatorFactory factory = new ScanFilterAndProjectOperator.ScanFilterAndProjectOperatorFactory(
                 0,
+                new PlanNodeId("test"),
                 new PlanNodeId("0"),
                 new PageSourceProvider() {
                     @Override
@@ -70,12 +72,12 @@ public class TestScanFilterAndProjectOperator
                     }
                 },
                 new GenericCursorProcessor(FilterFunctions.TRUE_FUNCTION, ImmutableList.of(singleColumn(VARCHAR, 0))),
-                new GenericPageProcessor(FilterFunctions.TRUE_FUNCTION, ImmutableList.of(singleColumn(VARCHAR, 0))),
+                () -> new GenericPageProcessor(FilterFunctions.TRUE_FUNCTION, ImmutableList.of(singleColumn(VARCHAR, 0))),
                 ImmutableList.<ColumnHandle>of(),
                 ImmutableList.<Type>of(VARCHAR));
 
         SourceOperator operator = factory.createOperator(driverContext);
-        operator.addSplit(new Split("test", TestingSplit.createLocalSplit()));
+        operator.addSplit(new Split("test", TestingTransactionHandle.create("test"), TestingSplit.createLocalSplit()));
         operator.noMoreSplits();
 
         MaterializedResult expected = toMaterializedResult(driverContext.getSession(), ImmutableList.<Type>of(VARCHAR), ImmutableList.of(input));
@@ -94,21 +96,22 @@ public class TestScanFilterAndProjectOperator
 
         ScanFilterAndProjectOperator.ScanFilterAndProjectOperatorFactory factory = new ScanFilterAndProjectOperator.ScanFilterAndProjectOperatorFactory(
                 0,
+                new PlanNodeId("test"),
                 new PlanNodeId("0"),
                 new PageSourceProvider() {
                     @Override
                     public ConnectorPageSource createPageSource(Session session, Split split, List<ColumnHandle> columns)
                     {
-                        return new RecordPageSource(new PageRecordSet(ImmutableList.<Type>of(VARCHAR), input));
+                        return new DefaultRecordPageSource(new PageRecordSet(ImmutableList.<Type>of(VARCHAR), input));
                     }
                 },
                 new GenericCursorProcessor(FilterFunctions.TRUE_FUNCTION, ImmutableList.of(singleColumn(VARCHAR, 0))),
-                new GenericPageProcessor(FilterFunctions.TRUE_FUNCTION, ImmutableList.of(singleColumn(VARCHAR, 0))),
+                () -> new GenericPageProcessor(FilterFunctions.TRUE_FUNCTION, ImmutableList.of(singleColumn(VARCHAR, 0))),
                 ImmutableList.<ColumnHandle>of(),
                 ImmutableList.<Type>of(VARCHAR));
 
         SourceOperator operator = factory.createOperator(driverContext);
-        operator.addSplit(new Split("test", TestingSplit.createLocalSplit()));
+        operator.addSplit(new Split("test", TestingTransactionHandle.create("test"), TestingSplit.createLocalSplit()));
         operator.noMoreSplits();
 
         MaterializedResult expected = toMaterializedResult(driverContext.getSession(), ImmutableList.<Type>of(VARCHAR), ImmutableList.of(input));

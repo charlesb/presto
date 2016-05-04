@@ -13,16 +13,21 @@
  */
 package com.facebook.presto.type;
 
+import com.facebook.presto.spi.type.DecimalType;
+import com.facebook.presto.spi.type.NamedTypeSignature;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
+import com.facebook.presto.spi.type.TypeParameter;
 import com.facebook.presto.spi.type.TypeSignature;
+import com.facebook.presto.spi.type.TypeSignatureParameter;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import javax.annotation.concurrent.ThreadSafe;
 import javax.inject.Inject;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -33,17 +38,22 @@ import java.util.concurrent.ConcurrentMap;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DateType.DATE;
+import static com.facebook.presto.spi.type.DecimalType.createDecimalTypeSignature;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.HyperLogLogType.HYPER_LOG_LOG;
 import static com.facebook.presto.spi.type.IntervalDayTimeType.INTERVAL_DAY_TIME;
 import static com.facebook.presto.spi.type.IntervalYearMonthType.INTERVAL_YEAR_MONTH;
 import static com.facebook.presto.spi.type.P4HyperLogLogType.P4_HYPER_LOG_LOG;
+import static com.facebook.presto.spi.type.ParameterKind.LONG;
+import static com.facebook.presto.spi.type.ParameterKind.NAMED_TYPE;
+import static com.facebook.presto.spi.type.ParameterKind.TYPE;
+import static com.facebook.presto.spi.type.StandardTypes.DECIMAL;
+import static com.facebook.presto.spi.type.StandardTypes.VARCHAR;
 import static com.facebook.presto.spi.type.TimeType.TIME;
 import static com.facebook.presto.spi.type.TimeWithTimeZoneType.TIME_WITH_TIME_ZONE;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.TimestampWithTimeZoneType.TIMESTAMP_WITH_TIME_ZONE;
 import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
-import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.type.ArrayParametricType.ARRAY;
 import static com.facebook.presto.type.ColorType.COLOR;
 import static com.facebook.presto.type.FunctionParametricType.FUNCTION;
@@ -58,11 +68,15 @@ import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
 import static java.util.Objects.requireNonNull;
+import static java.util.stream.Collectors.toList;
 
 @ThreadSafe
 public final class TypeRegistry
         implements TypeManager
 {
+    private static final List<String> VARCHAR_SUBTYPES = ImmutableList.of(StandardTypes.DATE, StandardTypes.TIME, StandardTypes.TIME_WITH_TIME_ZONE,
+            StandardTypes.TIMESTAMP, StandardTypes.TIMESTAMP_WITH_TIME_ZONE, RegexpType.NAME, LikePatternType.NAME, JsonPathType.NAME);
+
     private final ConcurrentMap<TypeSignature, Type> types = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, ParametricType> parametricTypes = new ConcurrentHashMap<>();
 
@@ -83,7 +97,6 @@ public final class TypeRegistry
         addType(BOOLEAN);
         addType(BIGINT);
         addType(DOUBLE);
-        addType(VARCHAR);
         addType(VARBINARY);
         addType(DATE);
         addType(TIME);
@@ -99,6 +112,8 @@ public final class TypeRegistry
         addType(JSON_PATH);
         addType(COLOR);
         addType(JSON);
+        addParametricType(VarcharParametricType.VARCHAR);
+        addParametricType(DecimalParametricType.DECIMAL);
         addParametricType(ROW);
         addParametricType(ARRAY);
         addParametricType(MAP);
@@ -120,28 +135,43 @@ public final class TypeRegistry
     }
 
     @Override
-    public Type getParameterizedType(String baseTypeName, List<TypeSignature> typeParameters, List<Object> literalParameters)
+    public Type getParameterizedType(String baseTypeName, List<TypeSignatureParameter> typeParameters)
     {
-        return getType(new TypeSignature(baseTypeName, typeParameters, literalParameters));
+        return getType(new TypeSignature(baseTypeName, typeParameters));
+    }
+
+    @Override
+    @Deprecated
+    public Type getParameterizedType(String baseTypeName, List<TypeSignature> typeParameters, List<String> literalParameters)
+    {
+        if (baseTypeName.equals(StandardTypes.ROW)) {
+            return getType(new TypeSignature(baseTypeName, typeParameters, literalParameters));
+        }
+        return getParameterizedType(
+                baseTypeName,
+                typeParameters.stream().map(TypeSignatureParameter::of).collect(toList()));
     }
 
     private Type instantiateParametricType(TypeSignature signature)
     {
-        ImmutableList.Builder<Type> parameterTypes = ImmutableList.builder();
-        for (TypeSignature parameter : signature.getParameters()) {
-            Type parameterType = getType(parameter);
-            if (parameterType == null) {
+        List<TypeParameter> parameters = new ArrayList<>();
+
+        for (TypeSignatureParameter parameter : signature.getParameters()) {
+            TypeParameter typeParameter = TypeParameter.of(parameter, this);
+            if (typeParameter == null) {
                 return null;
             }
-            parameterTypes.add(parameterType);
+            parameters.add(typeParameter);
         }
 
         ParametricType parametricType = parametricTypes.get(signature.getBase().toLowerCase(Locale.ENGLISH));
         if (parametricType == null) {
             return null;
         }
-        Type instantiatedType = parametricType.createType(parameterTypes.build(), signature.getLiteralParameters());
-        checkState(instantiatedType.getTypeSignature().equals(signature), "Instantiated parametric type name (%s) does not match expected name (%s)", instantiatedType, signature);
+        Type instantiatedType = parametricType.createType(parameters);
+
+        // TODO: reimplement this check? Currently "varchar(Integer.MAX_VALUE)" fails with "varchar"
+        //checkState(instantiatedType.equalsSignature(signature), "Instantiated parametric type name (%s) does not match expected name (%s)", instantiatedType, signature);
         return instantiatedType;
     }
 
@@ -198,7 +228,7 @@ public final class TypeRegistry
         }
         switch (fromTypeBase) {
             case StandardTypes.BIGINT:
-                return StandardTypes.DOUBLE.equals(toTypeBase);
+                return StandardTypes.DOUBLE.equals(toTypeBase) || StandardTypes.DECIMAL.equals(toTypeBase);
             case StandardTypes.DATE:
                 return StandardTypes.TIMESTAMP.equals(toTypeBase) || StandardTypes.TIMESTAMP_WITH_TIME_ZONE.equals(toTypeBase);
             case StandardTypes.TIME:
@@ -206,9 +236,11 @@ public final class TypeRegistry
             case StandardTypes.TIMESTAMP:
                 return StandardTypes.TIMESTAMP_WITH_TIME_ZONE.equals(toTypeBase);
             case StandardTypes.VARCHAR:
-                return RegexpType.NAME.equals(toTypeBase) || LikePatternType.NAME.equals(toTypeBase) || JsonPathType.NAME.equals(toTypeBase);
+                return VARCHAR_SUBTYPES.contains(toTypeBase);
             case StandardTypes.P4_HYPER_LOG_LOG:
                 return StandardTypes.HYPER_LOG_LOG.equals(toTypeBase);
+            case StandardTypes.DECIMAL:
+                return StandardTypes.DOUBLE.equals(toTypeBase);
         }
         return false;
     }
@@ -219,7 +251,7 @@ public final class TypeRegistry
         // Other methods should reference these two functions instead of hand-code new rules.
 
         // if we ever introduce contravariant, this function should be changed to return an enumeration: INVARIANT, COVARIANT, CONTRAVARIANT
-        return firstTypeBase.equals(StandardTypes.ARRAY);
+        return firstTypeBase.equals(StandardTypes.ARRAY) || firstTypeBase.equals(StandardTypes.MAP);
     }
 
     public static boolean canCoerce(Type actualType, Type expectedType)
@@ -230,7 +262,73 @@ public final class TypeRegistry
     public static boolean canCoerce(TypeSignature actualType, TypeSignature expectedType)
     {
         Optional<TypeSignature> commonSuperTypeSignature = getCommonSuperTypeSignature(actualType, expectedType);
-        return commonSuperTypeSignature.isPresent() && commonSuperTypeSignature.get().equals(expectedType);
+        return commonSuperTypeSignature.isPresent() && typesMatch(commonSuperTypeSignature.get(), expectedType);
+    }
+
+    /**
+     * Checks type signatures for equality with the only difference:
+     * <p>
+     * If the long parameters are not specified in `expectedType` than any calculated long values will be accepted
+     * <p>
+     * e.g.
+     * <p>
+     * typesMatch(DECIMAL(2,1), DECIMAL) -> TRUE
+     * typesMatch(DECIMAL(2,1), DECIMAL(p, n)) -> TRUE
+     * typesMatch(DECIMAL(2,1), DECIMAL(3, 2)) -> FALSE
+     * typesMatch(ARRAY(DECIMAL(2,1)), ARRAY(DECIMAL(p, n))) -> TRUE
+     * <p>
+     * Type parameters are still matched on strict equality
+     * <p>
+     * typesMatch(ARRAY(BIGINT), ARRAY(DOUBLE)) -> FALSE
+     */
+    private static boolean typesMatch(TypeSignature actualType, TypeSignature expectedType)
+    {
+        if (!actualType.getBase().equals(expectedType.getBase())) {
+            return false;
+        }
+
+        List<TypeSignatureParameter> actualTypeParameters = actualType.getParameters();
+        List<TypeSignatureParameter> expectedTypeParameters = expectedType.getParameters();
+        // expected parameters must be not specified at all (e.g. DECIMAL),
+        // or the expected parameters count must be the same as the actual (DECIMAL(p,s), DECIMAL(2,1))
+        checkState(expectedTypeParameters.isEmpty() || expectedTypeParameters.size() == actualTypeParameters.size());
+        for (int parameterIndex = 0; parameterIndex < expectedTypeParameters.size(); parameterIndex++) {
+            TypeSignatureParameter actualParameter = actualTypeParameters.get(parameterIndex);
+            TypeSignatureParameter expectedParameter = expectedTypeParameters.get(parameterIndex);
+            if (!typeParametersMatch(actualParameter, expectedParameter)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * This method is supposed to compare type parameters for the same base type.
+     * In case of uncompilable type parameters IllegalStateException will be thrown.
+     */
+    private static boolean typeParametersMatch(TypeSignatureParameter actualParameter, TypeSignatureParameter expectedParameter)
+    {
+        switch (expectedParameter.getKind()) {
+            case VARIABLE:
+                // parameter value must be already calculated here
+                checkState(actualParameter.getKind() == LONG);
+                return true;
+            case LONG:
+                checkState(actualParameter.getKind() == LONG);
+                return actualParameter.equals(expectedParameter);
+            case TYPE:
+                checkState(actualParameter.getKind() == TYPE);
+                return typesMatch(actualParameter.getTypeSignature(), expectedParameter.getTypeSignature());
+            case NAMED_TYPE: {
+                checkState(actualParameter.getKind() == NAMED_TYPE);
+                NamedTypeSignature actualNamedTypeSignature = actualParameter.getNamedTypeSignature();
+                NamedTypeSignature expectedNamedTypeSignature = expectedParameter.getNamedTypeSignature();
+                return actualNamedTypeSignature.getName().equals(expectedNamedTypeSignature.getName())
+                        && typesMatch(actualNamedTypeSignature.getTypeSignature(), expectedNamedTypeSignature.getTypeSignature());
+            }
+            default:
+                throw new IllegalStateException("Unexpected parameter kind: " + expectedParameter.getKind());
+        }
     }
 
     @Override
@@ -258,6 +356,7 @@ public final class TypeRegistry
         if (canCastTypeBase(secondTypeBase, firstTypeBase)) {
             return Optional.of(firstTypeBase);
         }
+
         return Optional.empty();
     }
 
@@ -277,8 +376,13 @@ public final class TypeRegistry
 
     public static Optional<TypeSignature> getCommonSuperTypeSignature(TypeSignature firstType, TypeSignature secondType)
     {
+        TypeSignaturePair typeSignaturePair = new TypeSignaturePair(firstType, secondType);
+        if (typeSignaturePair.containsAnyOf(StandardTypes.DECIMAL, StandardTypes.VARCHAR)) {
+            return getCommonSuperTypeForTypesWithLongParameters(typeSignaturePair);
+        }
+
         // Special handling for UnknownType is necessary because we forbid cast between types with different number of type parameters.
-        // Without this, cast from null to map<bigint, bigint> will not be allowed.
+        // Without this, cast from null to map(bigint, bigint) will not be allowed.
         if (UnknownType.NAME.equals(firstType.getBase())) {
             return Optional.of(secondType);
         }
@@ -286,37 +390,220 @@ public final class TypeRegistry
             return Optional.of(firstType);
         }
 
-        List<TypeSignature> firstTypeTypeParameters = firstType.getParameters();
-        List<TypeSignature> secondTypeTypeParameters = secondType.getParameters();
-        if (firstTypeTypeParameters.size() != secondTypeTypeParameters.size()) {
-            return Optional.empty();
-        }
-        if (!firstType.getLiteralParameters().equals(secondType.getLiteralParameters())) {
-            return Optional.empty();
-        }
-
         Optional<String> commonSuperTypeBase = getCommonSuperTypeBase(firstType.getBase(), secondType.getBase());
         if (!commonSuperTypeBase.isPresent()) {
             return Optional.empty();
         }
 
-        ImmutableList.Builder<TypeSignature> typeParameters = ImmutableList.builder();
+        List<TypeSignatureParameter> firstTypeTypeParameters = firstType.getParameters();
+        List<TypeSignatureParameter> secondTypeTypeParameters = secondType.getParameters();
+
+        if (firstTypeTypeParameters.size() != secondTypeTypeParameters.size()) {
+            return Optional.empty();
+        }
+
+        ImmutableList.Builder<TypeSignatureParameter> typeParameters = ImmutableList.builder();
         for (int i = 0; i < firstTypeTypeParameters.size(); i++) {
+            TypeSignatureParameter firstParameter = firstTypeTypeParameters.get(i);
+            TypeSignatureParameter secondParameter = secondTypeTypeParameters.get(i);
+
             if (isCovariantParameterPosition(commonSuperTypeBase.get(), i)) {
-                Optional<TypeSignature> commonSuperType = getCommonSuperTypeSignature(firstTypeTypeParameters.get(i), secondTypeTypeParameters.get(i));
+                Optional<TypeSignature> firstParameterSignature = firstParameter.getTypeSignatureOrNamedTypeSignature();
+                Optional<TypeSignature> secondParameterSignature = secondParameter.getTypeSignatureOrNamedTypeSignature();
+                if (!firstParameterSignature.isPresent() || !secondParameterSignature.isPresent()) {
+                    return Optional.empty();
+                }
+
+                Optional<TypeSignature> commonSuperType = getCommonSuperTypeSignature(
+                        firstParameterSignature.get(), secondParameterSignature.get());
                 if (!commonSuperType.isPresent()) {
                     return Optional.empty();
                 }
-                typeParameters.add(commonSuperType.get());
+                typeParameters.add(TypeSignatureParameter.of(commonSuperType.get()));
             }
             else {
-                if (!firstTypeTypeParameters.get(i).equals(secondTypeTypeParameters.get(i))) {
+                if (!firstParameter.equals(secondParameter)) {
                     return Optional.empty();
                 }
-                typeParameters.add(firstTypeTypeParameters.get(i));
+                typeParameters.add(firstParameter);
             }
         }
 
-        return Optional.of(new TypeSignature(commonSuperTypeBase.get(), typeParameters.build(), firstType.getLiteralParameters()));
+        return Optional.of(new TypeSignature(commonSuperTypeBase.get(), typeParameters.build()));
+    }
+
+    /**
+     * In case of coercion between un-parametrized types (DOUBLE, BIGINT, ...)
+     * we only need to know whether coercion is allowed (true|false).
+     * But in case of coercion to the type with long parameters, parameters of the result type must be calculated.
+     * Such coercion rules must be implemented within this method.
+     * <p>
+     * e.g.:
+     * LONG -> DECIMAL = DECIMAL(19,0)
+     * UNKNOWN -> VARCHAR = VARCHAR(0)
+     */
+    private static Optional<TypeSignature> getCommonSuperTypeForTypesWithLongParameters(TypeSignaturePair typeSignaturePair)
+    {
+        checkState(typeSignaturePair.containsAnyOf(StandardTypes.VARCHAR, StandardTypes.DECIMAL));
+
+        for (String varcharSubType : VARCHAR_SUBTYPES) {
+            if (typeSignaturePair.is(StandardTypes.VARCHAR, varcharSubType)) {
+                return Optional.of(typeSignaturePair.get(varcharSubType));
+            }
+        }
+
+        if (typeSignaturePair.is(StandardTypes.VARCHAR, UnknownType.NAME)) {
+            return getCommonSuperTypeForVarchar(new TypeSignaturePair(
+                    typeSignaturePair.get(StandardTypes.VARCHAR),
+                    new TypeSignature(VARCHAR, ImmutableList.of(TypeSignatureParameter.of(0)))
+            ));
+        }
+
+        if (typeSignaturePair.is(StandardTypes.VARCHAR, StandardTypes.VARCHAR)) {
+            return getCommonSuperTypeForVarchar(typeSignaturePair);
+        }
+
+        if (typeSignaturePair.is(StandardTypes.DECIMAL, UnknownType.NAME)) {
+            return getCommonSuperTypeForDecimals(new TypeSignaturePair(
+                    typeSignaturePair.get(StandardTypes.DECIMAL),
+                    createDecimalTypeSignature(1, 0)
+            ));
+        }
+
+        if (typeSignaturePair.is(StandardTypes.DECIMAL, StandardTypes.DOUBLE)) {
+            return Optional.of(typeSignaturePair.get(StandardTypes.DOUBLE));
+        }
+
+        if (typeSignaturePair.is(StandardTypes.DECIMAL, StandardTypes.BIGINT)) {
+            return getCommonSuperTypeForDecimals(new TypeSignaturePair(
+                    typeSignaturePair.get(StandardTypes.DECIMAL), createDecimalTypeSignature(19, 0)
+            ));
+        }
+
+        if (typeSignaturePair.is(StandardTypes.DECIMAL, StandardTypes.DECIMAL)) {
+            return getCommonSuperTypeForDecimals(typeSignaturePair);
+        }
+
+        return Optional.empty();
+    }
+
+    private static Optional<TypeSignature> getCommonSuperTypeForVarchar(TypeSignaturePair typeSignaturePair)
+    {
+        checkState(typeSignaturePair.is(StandardTypes.VARCHAR, StandardTypes.VARCHAR));
+        checkState(!typeSignaturePair.bothTypesAreCalculated());
+        checkState(!typeSignaturePair.bothTypesAreUnparametrized());
+
+        if (typeSignaturePair.bothTypesAreWithLongLiteralParameters()) {
+            TypeSignature firstType = typeSignaturePair.getFirstType();
+            TypeSignature secondType = typeSignaturePair.getSecondType();
+            List<TypeSignatureParameter> firstTypeParameters = firstType.getParameters();
+            List<TypeSignatureParameter> secondTypeParameters = secondType.getParameters();
+
+            checkState(firstTypeParameters.size() == 1);
+            checkState(secondTypeParameters.size() == 1);
+
+            long commonVarcharLength = Math.max(firstTypeParameters.get(0).getLongLiteral(), secondTypeParameters.get(0).getLongLiteral());
+
+            return Optional.of(new TypeSignature(VARCHAR, ImmutableList.of(TypeSignatureParameter.of(commonVarcharLength))));
+        }
+
+        return Optional.of(typeSignaturePair.getTypeWithLongLiteralParameters());
+    }
+
+    private static Optional<TypeSignature> getCommonSuperTypeForDecimals(TypeSignaturePair typeSignaturePair)
+    {
+        checkState(typeSignaturePair.is(StandardTypes.DECIMAL, StandardTypes.DECIMAL));
+        checkState(!typeSignaturePair.bothTypesAreCalculated());
+        checkState(!typeSignaturePair.bothTypesAreUnparametrized());
+
+        if (typeSignaturePair.bothTypesAreWithLongLiteralParameters()) {
+            TypeSignature firstType = typeSignaturePair.getFirstType();
+            TypeSignature secondType = typeSignaturePair.getSecondType();
+
+            List<TypeSignatureParameter> firstTypeParameters = firstType.getParameters();
+            List<TypeSignatureParameter> secondTypeParameters = secondType.getParameters();
+
+            checkState(firstTypeParameters.size() == 2);
+            checkState(secondTypeParameters.size() == 2);
+
+            long firstPrecision = firstTypeParameters.get(0).getLongLiteral();
+            long secondPrecision = secondTypeParameters.get(0).getLongLiteral();
+            long firstScale = firstTypeParameters.get(1).getLongLiteral();
+            long secondScale = secondTypeParameters.get(1).getLongLiteral();
+            long targetScale = Math.max(firstScale, secondScale);
+            long targetPrecision = Math.max(firstPrecision - firstScale, secondPrecision - secondScale) + targetScale;
+            targetPrecision = Math.min(38, targetPrecision); //we allow potential loss of precision here. Overflow checking is done in operators.
+            return Optional.of(new TypeSignature(
+                    DECIMAL,
+                    ImmutableList.of(TypeSignatureParameter.of(targetPrecision), TypeSignatureParameter.of(targetScale))));
+        }
+
+        return Optional.of(typeSignaturePair.getTypeWithLongLiteralParameters());
+    }
+
+    public static boolean isTypeOnlyCoercion(Type actualType, Type expectedType)
+    {
+        return isTypeOnlyCoercion(actualType.getTypeSignature(), expectedType.getTypeSignature());
+    }
+
+    /*
+     * Return true if actualType can be coerced to expectedType AND they are both binary compatible (so it's only type coercion)
+     */
+    public static boolean isTypeOnlyCoercion(TypeSignature actualType, TypeSignature expectedType)
+    {
+        if (!canCoerce(actualType, expectedType)) {
+            return false;
+        }
+
+        if (actualType.equals(expectedType)) {
+            return true;
+        }
+        else if (actualType.equals(UNKNOWN.getTypeSignature())) {
+            return true;
+        }
+        else if (actualType.getBase().equals(StandardTypes.VARCHAR) && expectedType.getBase().equals(StandardTypes.VARCHAR)) {
+            return true;
+        }
+
+        if (actualType.getBase().equals(DECIMAL) && expectedType.getBase().equals(DECIMAL)) {
+            long actualPrecision = actualType.getParameters().get(0).getLongLiteral();
+            long expectedPrecision = (long) expectedType.getParameters().get(0).getLongLiteral();
+            long actualScale = (long) actualType.getParameters().get(1).getLongLiteral();
+            long expectedScale = (long) expectedType.getParameters().get(1).getLongLiteral();
+
+            if (actualPrecision <= DecimalType.MAX_SHORT_PRECISION ^ expectedPrecision <= DecimalType.MAX_SHORT_PRECISION) {
+                return false;
+            }
+
+            return actualScale == expectedScale && actualPrecision <= expectedPrecision;
+        }
+
+        if (actualType.getBase().equals(expectedType.getBase()) &&
+                actualType.getParameters().size() == expectedType.getParameters().size()) {
+            for (int i = 0; i < actualType.getParameters().size(); i++) {
+                if (!isCovariantParameterPosition(actualType.getBase(), i)) {
+                    return false;
+                }
+
+                TypeSignatureParameter actualParameter = actualType.getParameters().get(i);
+                TypeSignatureParameter expectedParameter = expectedType.getParameters().get(i);
+                if (actualParameter.equals(expectedParameter)) {
+                    continue;
+                }
+
+                Optional<TypeSignature> actualParameterSignature = actualParameter.getTypeSignatureOrNamedTypeSignature();
+                Optional<TypeSignature> expectedParameterSignature = expectedParameter.getTypeSignatureOrNamedTypeSignature();
+                if (!actualParameterSignature.isPresent() || !expectedParameterSignature.isPresent()) {
+                    return false;
+                }
+
+                if (!isTypeOnlyCoercion(actualParameterSignature.get(), expectedParameterSignature.get())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        return false;
     }
 }

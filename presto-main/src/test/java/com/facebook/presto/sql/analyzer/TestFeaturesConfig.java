@@ -36,9 +36,12 @@ public class TestFeaturesConfig
                 .setOptimizeMetadataQueries(false)
                 .setOptimizeHashGeneration(true)
                 .setOptimizeSingleDistinct(true)
+                .setPushTableWriteThroughUnion(true)
                 .setIntermediateAggregationsEnabled(false)
                 .setColumnarProcessing(false)
-                .setColumnarProcessingDictionary(false));
+                .setColumnarProcessingDictionary(false)
+                .setDictionaryAggregation(false)
+                .setParseDecimalLiteralsAsDouble(false));
     }
 
     @Test
@@ -52,9 +55,12 @@ public class TestFeaturesConfig
                 .put("optimizer.optimize-metadata-queries", "true")
                 .put("optimizer.optimize-hash-generation", "false")
                 .put("optimizer.optimize-single-distinct", "false")
+                .put("optimizer.push-table-write-through-union", "false")
                 .put("optimizer.use-intermediate-aggregations", "true")
                 .put("optimizer.columnar-processing", "true")
                 .put("optimizer.columnar-processing-dictionary", "true")
+                .put("optimizer.dictionary-aggregation", "true")
+                .put("parse-decimal-literals-as-double", "true")
                 .build();
         Map<String, String> properties = new ImmutableMap.Builder<String, String>()
                 .put("experimental-syntax-enabled", "true")
@@ -64,9 +70,12 @@ public class TestFeaturesConfig
                 .put("optimizer.optimize-metadata-queries", "true")
                 .put("optimizer.optimize-hash-generation", "false")
                 .put("optimizer.optimize-single-distinct", "false")
+                .put("optimizer.push-table-write-through-union", "false")
                 .put("optimizer.use-intermediate-aggregations", "true")
                 .put("optimizer.columnar-processing", "true")
                 .put("optimizer.columnar-processing-dictionary", "true")
+                .put("optimizer.dictionary-aggregation", "true")
+                .put("parse-decimal-literals-as-double", "true")
                 .build();
 
         FeaturesConfig expected = new FeaturesConfig()
@@ -77,9 +86,12 @@ public class TestFeaturesConfig
                 .setOptimizeMetadataQueries(true)
                 .setOptimizeHashGeneration(false)
                 .setOptimizeSingleDistinct(false)
+                .setPushTableWriteThroughUnion(false)
                 .setIntermediateAggregationsEnabled(true)
                 .setColumnarProcessing(true)
-                .setColumnarProcessingDictionary(true);
+                .setColumnarProcessingDictionary(true)
+                .setDictionaryAggregation(true)
+                .setParseDecimalLiteralsAsDouble(true);
 
         assertFullMapping(properties, expected);
         assertDeprecatedEquivalence(FeaturesConfig.class, properties, propertiesLegacy);

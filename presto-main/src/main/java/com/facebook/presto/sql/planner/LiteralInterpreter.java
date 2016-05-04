@@ -17,15 +17,20 @@ import com.facebook.presto.block.BlockSerdeUtil;
 import com.facebook.presto.metadata.FunctionRegistry;
 import com.facebook.presto.metadata.Metadata;
 import com.facebook.presto.metadata.Signature;
+import com.facebook.presto.operator.scalar.ScalarFunctionImplementation;
 import com.facebook.presto.operator.scalar.VarbinaryFunctions;
 import com.facebook.presto.spi.ConnectorSession;
 import com.facebook.presto.spi.block.Block;
+import com.facebook.presto.spi.type.DecimalType;
 import com.facebook.presto.spi.type.Type;
+import com.facebook.presto.spi.type.VarcharType;
 import com.facebook.presto.sql.analyzer.SemanticException;
 import com.facebook.presto.sql.tree.ArithmeticUnaryExpression;
 import com.facebook.presto.sql.tree.AstVisitor;
+import com.facebook.presto.sql.tree.BinaryLiteral;
 import com.facebook.presto.sql.tree.BooleanLiteral;
 import com.facebook.presto.sql.tree.Cast;
+import com.facebook.presto.sql.tree.DecimalLiteral;
 import com.facebook.presto.sql.tree.DoubleLiteral;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FunctionCall;
@@ -44,8 +49,9 @@ import com.google.common.primitives.Primitives;
 import io.airlift.slice.DynamicSliceOutput;
 import io.airlift.slice.Slice;
 import io.airlift.slice.SliceOutput;
+import io.airlift.slice.SliceUtf8;
+import io.airlift.slice.Slices;
 
-import java.lang.invoke.MethodHandle;
 import java.util.List;
 
 import static com.facebook.presto.metadata.FunctionKind.SCALAR;
@@ -105,7 +111,7 @@ public final class LiteralInterpreter
             if (type.equals(UNKNOWN)) {
                 return new NullLiteral();
             }
-            return new Cast(new NullLiteral(), type.getTypeSignature().toString());
+            return new Cast(new NullLiteral(), type.getTypeSignature().toString(), false, true);
         }
 
         checkArgument(Primitives.wrap(type.getJavaType()).isInstance(object), "object.getClass (%s) and type.getJavaType (%s) do not agree", object.getClass(), type.getJavaType());
@@ -132,13 +138,20 @@ public final class LiteralInterpreter
             }
         }
 
-        if (type.equals(VARCHAR)) {
-            if (object instanceof Slice) {
-                return new StringLiteral(((Slice) object).toStringUtf8());
+        if (type instanceof VarcharType) {
+            if (object instanceof String) {
+                object = Slices.utf8Slice((String) object);
             }
 
-            if (object instanceof String) {
-                return new StringLiteral((String) object);
+            if (object instanceof Slice) {
+                Slice value = (Slice) object;
+                int length = SliceUtf8.countCodePoints(value);
+
+                if (length == ((VarcharType) type).getLength()) {
+                    return new StringLiteral(value.toStringUtf8());
+                }
+
+                return new Cast(new StringLiteral(value.toStringUtf8()), type.getDisplayName(), false, true);
             }
 
             throw new IllegalArgumentException("object must be instance of Slice or String when type is VARCHAR");
@@ -155,7 +168,7 @@ public final class LiteralInterpreter
             // This if condition will evaluate to true: object instanceof Slice && !type.equals(VARCHAR)
         }
 
-        if (object instanceof Slice && !type.equals(VARCHAR)) {
+        if (object instanceof Slice) {
             // HACK: we need to serialize VARBINARY in a format that can be embedded in an expression to be
             // able to encode it in the plan that gets sent to workers.
             // We do this by transforming the in-memory varbinary into a call to from_base64(<base64-encoded value>)
@@ -205,9 +218,21 @@ public final class LiteralInterpreter
         }
 
         @Override
+        protected Object visitDecimalLiteral(DecimalLiteral node, ConnectorSession context)
+        {
+            return DecimalType.unscaledValueToObject(node.getUnscaledValue(), node.getPrecision());
+        }
+
+        @Override
         protected Slice visitStringLiteral(StringLiteral node, ConnectorSession session)
         {
             return node.getSlice();
+        }
+
+        @Override
+        protected Slice visitBinaryLiteral(BinaryLiteral node, ConnectorSession session)
+        {
+            return node.getValue();
         }
 
         @Override
@@ -219,7 +244,7 @@ public final class LiteralInterpreter
             }
 
             if (JSON.equals(type)) {
-                MethodHandle operator = metadata.getFunctionRegistry().getScalarFunctionImplementation(new Signature("json_parse", SCALAR, JSON.getTypeSignature(), VARCHAR.getTypeSignature())).getMethodHandle();
+                ScalarFunctionImplementation operator = metadata.getFunctionRegistry().getScalarFunctionImplementation(new Signature("json_parse", SCALAR, JSON.getTypeSignature(), VARCHAR.getTypeSignature()));
                 try {
                     return ExpressionInterpreter.invoke(session, operator, ImmutableList.<Object>of(utf8Slice(node.getValue())));
                 }
@@ -228,10 +253,10 @@ public final class LiteralInterpreter
                 }
             }
 
-            MethodHandle operator;
+            ScalarFunctionImplementation operator;
             try {
                 Signature signature = metadata.getFunctionRegistry().getCoercion(VARCHAR, type);
-                operator = metadata.getFunctionRegistry().getScalarFunctionImplementation(signature).getMethodHandle();
+                operator = metadata.getFunctionRegistry().getScalarFunctionImplementation(signature);
             }
             catch (IllegalArgumentException e) {
                 throw new SemanticException(TYPE_MISMATCH, node, "No literal form for type %s", type);

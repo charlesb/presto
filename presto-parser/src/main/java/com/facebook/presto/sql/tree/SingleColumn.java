@@ -44,7 +44,7 @@ public class SingleColumn
         this(Optional.of(location), expression, alias);
     }
 
-    private SingleColumn(Optional<NodeLocation> location, Expression expression, Optional<String> alias)
+    protected SingleColumn(Optional<NodeLocation> location, Expression expression, Optional<String> alias)
     {
         super(location);
         requireNonNull(expression, "expression is null");
@@ -73,7 +73,7 @@ public class SingleColumn
         if (obj == null || getClass() != obj.getClass()) {
             return false;
         }
-        final SingleColumn other = (SingleColumn) obj;
+        SingleColumn other = (SingleColumn) obj;
         return Objects.equals(this.alias, other.alias) && Objects.equals(this.expression, other.expression);
     }
 

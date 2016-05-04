@@ -25,9 +25,14 @@ public class FeaturesConfig
     private boolean optimizeMetadataQueries;
     private boolean optimizeHashGeneration = true;
     private boolean optimizeSingleDistinct = true;
-    private boolean intermediateAggregationsEnabled = false;
-    private boolean columnarProcessing = false;
-    private boolean columnarProcessingDictionary = false;
+    private boolean pushTableWriteThroughUnion = true;
+    private boolean intermediateAggregationsEnabled;
+
+    private boolean columnarProcessing;
+    private boolean columnarProcessingDictionary;
+    private boolean dictionaryAggregation;
+
+    private boolean parseDecimalLiteralsAsDouble;
 
     @LegacyConfig("analyzer.experimental-syntax-enabled")
     @Config("experimental-syntax-enabled")
@@ -114,6 +119,18 @@ public class FeaturesConfig
         return this;
     }
 
+    public boolean isPushTableWriteThroughUnion()
+    {
+        return pushTableWriteThroughUnion;
+    }
+
+    @Config("optimizer.push-table-write-through-union")
+    public FeaturesConfig setPushTableWriteThroughUnion(boolean pushTableWriteThroughUnion)
+    {
+        this.pushTableWriteThroughUnion = pushTableWriteThroughUnion;
+        return this;
+    }
+
     public boolean isIntermediateAggregationsEnabled()
     {
         return intermediateAggregationsEnabled;
@@ -147,6 +164,30 @@ public class FeaturesConfig
     public FeaturesConfig setColumnarProcessingDictionary(boolean columnarProcessingDictionary)
     {
         this.columnarProcessingDictionary = columnarProcessingDictionary;
+        return this;
+    }
+
+    public boolean isDictionaryAggregation()
+    {
+        return dictionaryAggregation;
+    }
+
+    @Config("optimizer.dictionary-aggregation")
+    public FeaturesConfig setDictionaryAggregation(boolean dictionaryAggregation)
+    {
+        this.dictionaryAggregation = dictionaryAggregation;
+        return this;
+    }
+
+    public boolean isParseDecimalLiteralsAsDouble()
+    {
+        return parseDecimalLiteralsAsDouble;
+    }
+
+    @Config("parse-decimal-literals-as-double")
+    public FeaturesConfig setParseDecimalLiteralsAsDouble(boolean parseDecimalLiteralsAsDouble)
+    {
+        this.parseDecimalLiteralsAsDouble = parseDecimalLiteralsAsDouble;
         return this;
     }
 }

@@ -193,7 +193,7 @@ public class RunLengthEncodedBlock
     }
 
     @Override
-    public int hash(int position, int offset, int length)
+    public long hash(int position, int offset, int length)
     {
         return value.hash(0, offset, length);
     }
@@ -243,7 +243,7 @@ public class RunLengthEncodedBlock
 
     private void checkReadablePosition(int position)
     {
-        if (position < 0  || position >= positionCount) {
+        if (position < 0 || position >= positionCount) {
             throw new IllegalArgumentException("position is not valid");
         }
     }

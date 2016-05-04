@@ -23,6 +23,9 @@ import com.facebook.presto.spi.security.Identity;
 import com.facebook.presto.spi.session.PropertyMetadata;
 import com.facebook.presto.spi.type.TimeZoneKey;
 import com.facebook.presto.spi.type.TimeZoneNotSupportedException;
+import com.facebook.presto.sql.parser.ParsingException;
+import com.facebook.presto.sql.parser.SqlParser;
+import com.facebook.presto.transaction.TransactionId;
 import com.google.common.base.Splitter;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableMap;
@@ -35,10 +38,13 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
 import java.security.Principal;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -47,10 +53,12 @@ import java.util.Optional;
 
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_CATALOG;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_LANGUAGE;
+import static com.facebook.presto.client.PrestoHeaders.PRESTO_PREPARED_STATEMENT;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_SCHEMA;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_SESSION;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_SOURCE;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_TIME_ZONE;
+import static com.facebook.presto.client.PrestoHeaders.PRESTO_TRANSACTION_ID;
 import static com.facebook.presto.client.PrestoHeaders.PRESTO_USER;
 import static com.facebook.presto.util.ImmutableCollectors.toImmutableList;
 import static com.google.common.base.Strings.emptyToNull;
@@ -91,6 +99,12 @@ final class ResourceUtil
                 .setRemoteUserAddress(servletRequest.getRemoteAddr())
                 .setUserAgent(servletRequest.getHeader(USER_AGENT));
 
+        String transactionId = trimEmptyToNull(servletRequest.getHeader(PRESTO_TRANSACTION_ID));
+        if (transactionId != null) {
+            sessionBuilder.setClientTransactionSupport();
+            getTransactionId(transactionId).ifPresent(sessionBuilder::setTransactionId);
+        }
+
         String timeZoneId = servletRequest.getHeader(PRESTO_TIME_ZONE);
         if (timeZoneId != null) {
             sessionBuilder.setTimeZoneKey(getTimeZoneKey(timeZoneId));
@@ -130,6 +144,11 @@ final class ResourceUtil
             }
         }
 
+        Map<String, String> preparedStatements = new HashMap<>();
+        for (String preparedStatementsHeader : splitSessionHeader(servletRequest.getHeaders(PRESTO_PREPARED_STATEMENT))) {
+            parsePreparedStatementsHeader(preparedStatementsHeader, preparedStatements);
+        }
+        sessionBuilder.setPreparedStatements(preparedStatements);
         return sessionBuilder.build();
     }
 
@@ -195,12 +214,52 @@ final class ResourceUtil
         }
     }
 
+    private static void parsePreparedStatementsHeader(String header, Map<String, String> preparedStatements)
+    {
+        List<String> nameValue = Splitter.on('=').limit(2).trimResults().splitToList(header);
+        assertRequest(nameValue.size() == 2, "Invalid %s header", PRESTO_PREPARED_STATEMENT);
+
+        String statementName;
+        String sqlString;
+        try {
+            statementName = URLDecoder.decode(nameValue.get(0), "UTF-8");
+            sqlString = URLDecoder.decode(nameValue.get(1), "UTF-8");
+        }
+        catch (UnsupportedEncodingException e) {
+            throw badRequest(e.getMessage());
+        }
+
+        // Validate statement
+        SqlParser sqlParser = new SqlParser();
+        try {
+            sqlParser.createStatement(sqlString);
+        }
+        catch (ParsingException e) {
+            throw badRequest(e.getMessage());
+        }
+
+        preparedStatements.put(statementName, sqlString);
+    }
+
     private static TimeZoneKey getTimeZoneKey(String timeZoneId)
     {
         try {
             return TimeZoneKey.getTimeZoneKey(timeZoneId);
         }
         catch (TimeZoneNotSupportedException e) {
+            throw badRequest(e.getMessage());
+        }
+    }
+
+    private static Optional<TransactionId> getTransactionId(String transactionId)
+    {
+        if (transactionId.toUpperCase().equals("NONE")) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(TransactionId.valueOf(transactionId));
+        }
+        catch (Exception e) {
             throw badRequest(e.getMessage());
         }
     }

@@ -19,6 +19,7 @@ import com.facebook.presto.metadata.TableHandle;
 import com.facebook.presto.spi.ColumnHandle;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.sql.tree.Delete;
+import com.facebook.presto.sql.tree.Explain;
 import com.facebook.presto.sql.tree.Expression;
 import com.facebook.presto.sql.tree.FunctionCall;
 import com.facebook.presto.sql.tree.InPredicate;
@@ -28,12 +29,13 @@ import com.facebook.presto.sql.tree.Query;
 import com.facebook.presto.sql.tree.QuerySpecification;
 import com.facebook.presto.sql.tree.Relation;
 import com.facebook.presto.sql.tree.SampledRelation;
+import com.facebook.presto.sql.tree.SubqueryExpression;
 import com.facebook.presto.sql.tree.Table;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.HashMultimap;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.SetMultimap;
+import com.google.common.collect.ListMultimap;
 
 import javax.annotation.concurrent.Immutable;
 
@@ -44,12 +46,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import static com.google.common.base.MoreObjects.firstNonNull;
 import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 
 public class Analysis
 {
     private Query query;
+    private Optional<Explain> explainAnalyze = Optional.empty();
     private String updateType;
 
     private final IdentityHashMap<Table, Query> namedQueries = new IdentityHashMap<>();
@@ -67,7 +71,8 @@ public class Analysis
     private final IdentityHashMap<QuerySpecification, List<FunctionCall>> windowFunctions = new IdentityHashMap<>();
 
     private final IdentityHashMap<Join, Expression> joins = new IdentityHashMap<>();
-    private final SetMultimap<Node, InPredicate> inPredicates = HashMultimap.create();
+    private final ListMultimap<Node, InPredicate> inPredicates = ArrayListMultimap.create();
+    private final ListMultimap<Node, SubqueryExpression> scalarSubqueries = ArrayListMultimap.create();
     private final IdentityHashMap<Join, JoinInPredicates> joinInPredicates = new IdentityHashMap<>();
 
     private final IdentityHashMap<Table, TableHandle> tables = new IdentityHashMap<>();
@@ -91,6 +96,13 @@ public class Analysis
     // for delete
     private Optional<Delete> delete = Optional.empty();
 
+    // for describe input and describe output
+    private boolean isDescribe = false;
+
+    // A row count query (as opposed to a result set query) is one that doesn't return
+    // any data, e.g. DDL (CREATE, ALTER, DROP, ...) and some DML (INSERT, UPDATE, DELETE, ...)
+    private boolean rowCountQuery = false;
+
     public Query getQuery()
     {
         return query;
@@ -99,6 +111,17 @@ public class Analysis
     public void setQuery(Query query)
     {
         this.query = query;
+    }
+
+    public Optional<Explain> getExplainAnalyze()
+    {
+        return explainAnalyze;
+    }
+
+    public void setExplainAnalyze(Explain explainAnalyze)
+    {
+        checkArgument(explainAnalyze.isAnalyze(), "%s is not an EXPLAIN ANALYZE", explainAnalyze);
+        this.explainAnalyze = Optional.of(explainAnalyze);
     }
 
     public String getUpdateType()
@@ -150,6 +173,11 @@ public class Analysis
     {
         checkArgument(types.containsKey(expression), "Expression not analyzed: %s", expression);
         return types.get(expression);
+    }
+
+    public Type getTypeAfterCoercion(Expression expression)
+    {
+        return firstNonNull(getCoercion(expression), getType(expression));
     }
 
     public Type[] getRelationCoercion(Relation relation)
@@ -227,14 +255,20 @@ public class Analysis
         return joins.get(join);
     }
 
-    public void addInPredicates(Node node, Set<InPredicate> inPredicates)
+    public void recordSubqueries(Node node, ExpressionAnalysis expressionAnalysis)
     {
-        this.inPredicates.putAll(node, inPredicates);
+        this.inPredicates.putAll(node, expressionAnalysis.getSubqueryInPredicates());
+        this.scalarSubqueries.putAll(node, expressionAnalysis.getScalarSubqueries());
     }
 
-    public Set<InPredicate> getInPredicates(Node node)
+    public List<InPredicate> getInPredicates(Node node)
     {
         return inPredicates.get(node);
+    }
+
+    public List<SubqueryExpression> getScalarSubqueries(Node node)
+    {
+        return scalarSubqueries.get(node);
     }
 
     public void addJoinInPredicates(Join node, JoinInPredicates joinInPredicates)
@@ -400,6 +434,26 @@ public class Analysis
     {
         Preconditions.checkState(sampleRatios.containsKey(relation), "Sample ratio missing for %s. Broken analysis?", relation);
         return sampleRatios.get(relation);
+    }
+
+    public boolean isDescribe()
+    {
+        return isDescribe;
+    }
+
+    public void setIsDescribe(boolean isDescribe)
+    {
+        this.isDescribe = isDescribe;
+    }
+
+    public boolean isRowCountQuery()
+    {
+        return rowCountQuery;
+    }
+
+    public void setRowCountQuery(boolean rowCountQuery)
+    {
+        this.rowCountQuery = rowCountQuery;
     }
 
     public static class JoinInPredicates

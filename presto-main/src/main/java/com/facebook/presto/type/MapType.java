@@ -20,6 +20,7 @@ import com.facebook.presto.spi.block.BlockBuilder;
 import com.facebook.presto.spi.block.BlockBuilderStatus;
 import com.facebook.presto.spi.block.InterleavedBlockBuilder;
 import com.facebook.presto.spi.type.AbstractType;
+import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
 import com.google.common.collect.ImmutableList;
 
@@ -43,7 +44,7 @@ public class MapType
 
     public MapType(Type keyType, Type valueType)
     {
-        super(parameterizedTypeName("map", keyType.getTypeSignature(), valueType.getTypeSignature()), Block.class);
+        super(parameterizedTypeName(StandardTypes.MAP, keyType.getTypeSignature(), valueType.getTypeSignature()), Block.class);
         checkArgument(keyType.isComparable(), "key type must be comparable");
         this.keyType = keyType;
         this.valueType = valueType;
@@ -81,7 +82,7 @@ public class MapType
     }
 
     @Override
-    public int hash(Block block, int position)
+    public long hash(Block block, int position)
     {
         Block mapBlock = getObject(block, position);
         int result = 0;
@@ -151,7 +152,7 @@ public class MapType
         @Override
         public int hashCode()
         {
-            return type.hash(block, position);
+            return Long.hashCode(type.hash(block, position));
         }
 
         @Override
@@ -214,6 +215,6 @@ public class MapType
     @Override
     public String getDisplayName()
     {
-        return "map<" + keyType.getDisplayName() + ", " + valueType.getDisplayName() + ">";
+        return "map(" + keyType.getDisplayName() + ", " + valueType.getDisplayName() + ")";
     }
 }

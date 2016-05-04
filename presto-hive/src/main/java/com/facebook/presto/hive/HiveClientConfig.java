@@ -111,9 +111,20 @@ public class HiveClientConfig
 
     private boolean assumeCanonicalPartitionKeys;
 
+    private boolean useOrcColumnNames;
     private DataSize orcMaxMergeDistance = new DataSize(1, MEGABYTE);
     private DataSize orcMaxBufferSize = new DataSize(8, MEGABYTE);
     private DataSize orcStreamBufferSize = new DataSize(8, MEGABYTE);
+
+    private HiveMetastoreAuthenticationType hiveMetastoreAuthenticationType = HiveMetastoreAuthenticationType.SIMPLE;
+    private String hiveMetastorePrincipal;
+    private String hiveMetastorePrestoPrincipal;
+    private String hiveMetastorePrestoKeytab;
+
+    private String hdfsPrestoPrincipal;
+    private String hdfsPrestoKeytab;
+    private HdfsAuthenticationType hdfsAuthenticationType = HdfsAuthenticationType.SIMPLE;
+    private String hdfsTemporaryDirectoryTemplate = "/tmp";
 
     public int getMaxInitialSplits()
     {
@@ -798,6 +809,19 @@ public class HiveClientConfig
         return this;
     }
 
+    public boolean isUseOrcColumnNames()
+    {
+        return useOrcColumnNames;
+    }
+
+    @Config("hive.orc.use-column-names")
+    @ConfigDescription("Access ORC columns using names from the file")
+    public HiveClientConfig setUseOrcColumnNames(boolean useOrcColumnNames)
+    {
+        this.useOrcColumnNames = useOrcColumnNames;
+        return this;
+    }
+
     @NotNull
     public DataSize getOrcMaxMergeDistance()
     {
@@ -850,7 +874,7 @@ public class HiveClientConfig
     }
 
     public boolean isUseParquetColumnNames()
-   {
+    {
         return useParquetColumnNames;
     }
 
@@ -859,6 +883,129 @@ public class HiveClientConfig
     public HiveClientConfig setUseParquetColumnNames(boolean useParquetColumnNames)
     {
         this.useParquetColumnNames = useParquetColumnNames;
+        return this;
+    }
+
+    public HiveMetastoreAuthenticationType getHiveMetastoreAuthenticationType()
+    {
+        return hiveMetastoreAuthenticationType;
+    }
+
+    public enum HiveMetastoreAuthenticationType
+    {
+        SIMPLE,
+        SASL
+    }
+
+    @Config("hive.metastore.authentication.type")
+    @ConfigDescription("Hive Metastore authentication type. Possible values are: SIMPLE, SASL. Defaults to: SIMPLE")
+    public HiveClientConfig setHiveMetastoreAuthenticationType(HiveMetastoreAuthenticationType hiveMetastoreAuthenticationType)
+    {
+        this.hiveMetastoreAuthenticationType = hiveMetastoreAuthenticationType;
+        return this;
+    }
+
+    public String getHiveMetastorePrincipal()
+    {
+        return hiveMetastorePrincipal;
+    }
+
+    @Config("hive.metastore.principal")
+    @ConfigDescription("Hive Metastore service principal")
+    public HiveClientConfig setHiveMetastorePrincipal(String hiveMetastorePrincipal)
+    {
+        this.hiveMetastorePrincipal = hiveMetastorePrincipal;
+        return this;
+    }
+
+    public String getHiveMetastorePrestoPrincipal()
+    {
+        return hiveMetastorePrestoPrincipal;
+    }
+
+    @Config("hive.metastore.presto.principal")
+    @ConfigDescription("Presto principal used to access Hive Metastore")
+    public HiveClientConfig setHiveMetastorePrestoPrincipal(String hiveMetastorePrestoPrincipal)
+    {
+        this.hiveMetastorePrestoPrincipal = hiveMetastorePrestoPrincipal;
+        return this;
+    }
+
+    public String getHiveMetastorePrestoKeytab()
+    {
+        return hiveMetastorePrestoKeytab;
+    }
+
+    @Config("hive.metastore.presto.keytab")
+    @ConfigDescription("Presto keytab used to access Hive Metastore")
+    public HiveClientConfig setHiveMetastorePrestoKeytab(String hiveMetastorePrestoKeytab)
+    {
+        this.hiveMetastorePrestoKeytab = hiveMetastorePrestoKeytab;
+        return this;
+    }
+
+    public enum HdfsAuthenticationType
+    {
+        SIMPLE,
+        SIMPLE_IMPERSONATION,
+        KERBEROS,
+        KERBEROS_IMPERSONATION
+    }
+
+    public HdfsAuthenticationType getHdfsAuthenticationType()
+    {
+        return hdfsAuthenticationType;
+    }
+
+    @Config("hive.hdfs.authentication.type")
+    @ConfigDescription("HDFS authentication type. Possible values are: SIMPLE, SIMPLE_IMPERSONATION, KERBEROS, KERBEROS_IMPERSONATION. Defaults to: SIMPLE")
+    public HiveClientConfig setHdfsAuthenticationType(HdfsAuthenticationType hdfsAuthenticationType)
+    {
+        this.hdfsAuthenticationType = hdfsAuthenticationType;
+        return this;
+    }
+
+    public String getHdfsPrestoPrincipal()
+    {
+        return hdfsPrestoPrincipal;
+    }
+
+    @Config("hive.hdfs.presto.principal")
+    @ConfigDescription("Presto principal used to access HDFS")
+    public HiveClientConfig setHdfsPrestoPrincipal(String hdfsPrestoPrincipal)
+    {
+        this.hdfsPrestoPrincipal = hdfsPrestoPrincipal;
+        return this;
+    }
+
+    public String getHdfsPrestoKeytab()
+    {
+        return hdfsPrestoKeytab;
+    }
+
+    @Config("hive.hdfs.presto.keytab")
+    @ConfigDescription("Presto keytab used to access HDFS")
+    public HiveClientConfig setHdfsPrestoKeytab(String hdfsPrestoKeytab)
+    {
+        this.hdfsPrestoKeytab = hdfsPrestoKeytab;
+        return this;
+    }
+
+    public static String getHdfsTemporaryDirectory(String hdfsTemporaryDirectoryTemplate, String userName)
+    {
+        return hdfsTemporaryDirectoryTemplate.replace("%NAME%", userName);
+    }
+
+    public String getHdfsTemporaryDirectoryTemplate()
+    {
+        return hdfsTemporaryDirectoryTemplate;
+    }
+
+    @Config("hive.hdfs.temporary.directory")
+    @ConfigDescription("HDFS temporary directory template. '%NAME%' pattern will be replaced with the actual username")
+    public HiveClientConfig setHdfsTemporaryDirectoryTemplate(String hdfsTemporaryDirectoryTemplate)
+    {
+        this.hdfsTemporaryDirectoryTemplate = hdfsTemporaryDirectoryTemplate;
         return this;
     }
 }

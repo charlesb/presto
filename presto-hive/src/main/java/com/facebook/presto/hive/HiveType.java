@@ -14,14 +14,19 @@
 package com.facebook.presto.hive;
 
 import com.facebook.presto.spi.PrestoException;
+import com.facebook.presto.spi.type.DecimalType;
+import com.facebook.presto.spi.type.NamedTypeSignature;
 import com.facebook.presto.spi.type.StandardTypes;
 import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
+import com.facebook.presto.spi.type.TypeSignatureParameter;
+import com.facebook.presto.spi.type.VarcharType;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import com.google.common.collect.ImmutableList;
 import org.apache.hadoop.hive.serde2.objectinspector.PrimitiveObjectInspector;
+import org.apache.hadoop.hive.serde2.typeinfo.DecimalTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.ListTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.MapTypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.PrimitiveTypeInfo;
@@ -40,6 +45,7 @@ import static com.facebook.presto.spi.StandardErrorCode.NOT_SUPPORTED;
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
 import static com.facebook.presto.spi.type.DateType.DATE;
+import static com.facebook.presto.spi.type.DecimalType.createDecimalType;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
 import static com.facebook.presto.spi.type.VarbinaryType.VARBINARY;
@@ -150,8 +156,7 @@ public final class HiveType
     {
         switch (typeInfo.getCategory()) {
             case PRIMITIVE:
-                PrimitiveObjectInspector.PrimitiveCategory primitiveCategory = ((PrimitiveTypeInfo) typeInfo).getPrimitiveCategory();
-                return getPrimitiveType(primitiveCategory) != null;
+                return getPrimitiveType((PrimitiveTypeInfo) typeInfo) != null;
             case MAP:
                 MapTypeInfo mapTypeInfo = checkType(typeInfo, MapTypeInfo.class, "typeInfo");
                 return isSupportedType(mapTypeInfo.getMapKeyTypeInfo()) && isSupportedType(mapTypeInfo.getMapValueTypeInfo());
@@ -212,7 +217,7 @@ public final class HiveType
         if (DOUBLE.equals(type)) {
             return HIVE_DOUBLE.typeInfo;
         }
-        if (VARCHAR.equals(type)) {
+        if (type instanceof VarcharType) {
             return HIVE_STRING.typeInfo;
         }
         if (VARBINARY.equals(type)) {
@@ -224,6 +229,10 @@ public final class HiveType
         if (TIMESTAMP.equals(type)) {
             return HIVE_TIMESTAMP.typeInfo;
         }
+        if (type instanceof DecimalType) {
+            DecimalType decimalType = (DecimalType) type;
+            return new DecimalTypeInfo(decimalType.getPrecision(), decimalType.getScale());
+        }
         if (isArrayType(type)) {
             TypeInfo elementType = toTypeInfo(type.getTypeParameters().get(0));
             return getListTypeInfo(elementType);
@@ -234,10 +243,16 @@ public final class HiveType
             return getMapTypeInfo(keyType, valueType);
         }
         if (isRowType(type)) {
+            ImmutableList.Builder<String> fieldNames = ImmutableList.builder();
+            for (TypeSignatureParameter parameter : type.getTypeSignature().getParameters()) {
+                if (!parameter.isNamedTypeSignature()) {
+                    throw new IllegalArgumentException(format("Expected all parameters to be named type, but got %s", parameter));
+                }
+                NamedTypeSignature namedTypeSignature = parameter.getNamedTypeSignature();
+                fieldNames.add(namedTypeSignature.getName());
+            }
             return getStructTypeInfo(
-                    type.getTypeSignature().getLiteralParameters().stream()
-                            .map(String.class::cast)
-                            .collect(toList()),
+                    fieldNames.build(),
                     type.getTypeParameters().stream()
                             .map(HiveType::toTypeInfo)
                             .collect(toList()));
@@ -251,7 +266,7 @@ public final class HiveType
         switch (typeInfo.getCategory()) {
             case PRIMITIVE:
                 PrimitiveObjectInspector.PrimitiveCategory primitiveCategory = ((PrimitiveTypeInfo) typeInfo).getPrimitiveCategory();
-                Type primitiveType = getPrimitiveType(primitiveCategory);
+                Type primitiveType = getPrimitiveType((PrimitiveTypeInfo) typeInfo);
                 if (primitiveType == null) {
                     break;
                 }
@@ -260,26 +275,29 @@ public final class HiveType
                 MapTypeInfo mapTypeInfo = checkType(typeInfo, MapTypeInfo.class, "fieldInspector");
                 TypeSignature keyType = getTypeSignature(mapTypeInfo.getMapKeyTypeInfo());
                 TypeSignature valueType = getTypeSignature(mapTypeInfo.getMapValueTypeInfo());
-                return new TypeSignature(StandardTypes.MAP, ImmutableList.of(keyType, valueType), ImmutableList.of());
+                return new TypeSignature(
+                        StandardTypes.MAP,
+                        ImmutableList.of(TypeSignatureParameter.of(keyType), TypeSignatureParameter.of(valueType)));
             case LIST:
                 ListTypeInfo listTypeInfo = checkType(typeInfo, ListTypeInfo.class, "fieldInspector");
                 TypeSignature elementType = getTypeSignature(listTypeInfo.getListElementTypeInfo());
-                return new TypeSignature(StandardTypes.ARRAY, ImmutableList.of(elementType), ImmutableList.of());
+                return new TypeSignature(
+                        StandardTypes.ARRAY,
+                        ImmutableList.of(TypeSignatureParameter.of(elementType)));
             case STRUCT:
                 StructTypeInfo structTypeInfo = checkType(typeInfo, StructTypeInfo.class, "fieldInspector");
-                List<Object> fieldNames = ImmutableList.copyOf(structTypeInfo.getAllStructFieldNames());
                 List<TypeSignature> fieldTypes = structTypeInfo.getAllStructFieldTypeInfos()
                         .stream()
                         .map(HiveType::getTypeSignature)
                         .collect(toList());
-                return new TypeSignature(StandardTypes.ROW, fieldTypes, fieldNames);
+                return new TypeSignature(StandardTypes.ROW, fieldTypes, structTypeInfo.getAllStructFieldNames());
         }
         throw new PrestoException(NOT_SUPPORTED, format("Unsupported Hive type: %s", typeInfo));
     }
 
-    private static Type getPrimitiveType(PrimitiveObjectInspector.PrimitiveCategory primitiveCategory)
+public static Type getPrimitiveType(PrimitiveTypeInfo typeInfo)
     {
-        switch (primitiveCategory) {
+        switch (typeInfo.getPrimitiveCategory()) {
             case BOOLEAN:
                 return BOOLEAN;
             case BYTE:
@@ -296,12 +314,19 @@ public final class HiveType
                 return DOUBLE;
             case STRING:
                 return VARCHAR;
+            case VARCHAR:
+                return VARCHAR;
+            case CHAR:
+                return VARCHAR;
             case DATE:
                 return DATE;
             case TIMESTAMP:
                 return TIMESTAMP;
             case BINARY:
                 return VARBINARY;
+            case DECIMAL:
+                DecimalTypeInfo decimalTypeInfo = (DecimalTypeInfo) typeInfo;
+                return createDecimalType(decimalTypeInfo.precision(), decimalTypeInfo.scale());
             default:
                 return null;
         }

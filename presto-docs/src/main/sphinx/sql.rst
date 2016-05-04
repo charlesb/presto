@@ -8,6 +8,8 @@ This chapter describes the SQL syntax used in Presto.
     :maxdepth: 1
 
     sql/alter-table
+    sql/call
+    sql/commit
     sql/create-table
     sql/create-table-as
     sql/create-view
@@ -16,8 +18,10 @@ This chapter describes the SQL syntax used in Presto.
     sql/drop-table
     sql/drop-view
     sql/explain
+    sql/explain-analyze
     sql/insert
     sql/reset-session
+    sql/rollback
     sql/select
     sql/set-session
     sql/show-catalogs
@@ -27,5 +31,11 @@ This chapter describes the SQL syntax used in Presto.
     sql/show-schemas
     sql/show-session
     sql/show-tables
+    sql/start-transaction
     sql/use
     sql/values
+    sql/prepare
+    sql/execute
+    sql/deallocate-prepare
+    sql/describe-input
+    sql/describe-output

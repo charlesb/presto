@@ -13,6 +13,7 @@
  */
 package com.facebook.presto.sql.tree;
 
+import java.util.Objects;
 import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
@@ -39,7 +40,7 @@ public class ArithmeticUnaryExpression
         this(Optional.of(location), sign, value);
     }
 
-    private ArithmeticUnaryExpression(Optional<NodeLocation> location, Sign sign, Expression value)
+    protected ArithmeticUnaryExpression(Optional<NodeLocation> location, Sign sign, Expression value)
     {
         super(location);
         requireNonNull(value, "value is null");
@@ -96,22 +97,13 @@ public class ArithmeticUnaryExpression
         }
 
         ArithmeticUnaryExpression that = (ArithmeticUnaryExpression) o;
-
-        if (sign != that.sign) {
-            return false;
-        }
-        if (!value.equals(that.value)) {
-            return false;
-        }
-
-        return true;
+        return Objects.equals(value, that.value) &&
+                (sign == that.sign);
     }
 
     @Override
     public int hashCode()
     {
-        int result = value.hashCode();
-        result = 31 * result + sign.hashCode();
-        return result;
+        return Objects.hash(value, sign);
     }
 }

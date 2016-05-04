@@ -16,6 +16,7 @@ package com.facebook.presto.sql.tree;
 import com.google.common.collect.ImmutableList;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
@@ -36,7 +37,7 @@ public class ArrayConstructor
         this(Optional.of(location), values);
     }
 
-    private ArrayConstructor(Optional<NodeLocation> location, List<Expression> values)
+    protected ArrayConstructor(Optional<NodeLocation> location, List<Expression> values)
     {
         super(location);
         requireNonNull(values, "values is null");
@@ -65,12 +66,7 @@ public class ArrayConstructor
         }
 
         ArrayConstructor that = (ArrayConstructor) o;
-
-        if (!values.equals(that.values)) {
-            return false;
-        }
-
-        return true;
+        return Objects.equals(values, that.values);
     }
 
     @Override

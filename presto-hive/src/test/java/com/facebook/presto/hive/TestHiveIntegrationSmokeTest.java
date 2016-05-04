@@ -32,6 +32,7 @@ import org.intellij.lang.annotations.Language;
 import org.joda.time.DateTime;
 import org.testng.annotations.Test;
 
+import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.util.List;
@@ -43,6 +44,10 @@ import static com.facebook.presto.hive.HiveQueryRunner.createQueryRunner;
 import static com.facebook.presto.hive.HiveQueryRunner.createSampledSession;
 import static com.facebook.presto.hive.HiveTableProperties.PARTITIONED_BY_PROPERTY;
 import static com.facebook.presto.hive.HiveTableProperties.STORAGE_FORMAT_PROPERTY;
+import static com.facebook.presto.hive.HiveUtil.annotateColumnComment;
+import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
+import static com.facebook.presto.testing.MaterializedResult.resultBuilder;
+import static com.facebook.presto.transaction.TransactionBuilder.transaction;
 import static io.airlift.tpch.TpchTable.ORDERS;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.joda.time.DateTimeZone.UTC;
@@ -105,10 +110,12 @@ public class TestHiveIntegrationSmokeTest
                 " 'foo' _varchar" +
                 ", cast('bar' as varbinary) _varbinary" +
                 ", 1 _bigint" +
-                ", 3.14 _double" +
+                ", DOUBLE '3.14' _double" +
                 ", true _boolean" +
                 ", DATE '1980-05-07' _date" +
-                ", TIMESTAMP '1980-05-07 11:22:33.456' _timestamp";
+                ", TIMESTAMP '1980-05-07 11:22:33.456' _timestamp" +
+                ", DECIMAL '3.14' _decimal_short" +
+                ", DECIMAL '12345678901234567890.0123456789' _decimal_long";
 
         assertUpdate(query, 1);
 
@@ -122,6 +129,8 @@ public class TestHiveIntegrationSmokeTest
         assertEquals(row.getField(4), true);
         assertEquals(row.getField(5), new Date(new DateTime(1980, 5, 7, 0, 0, 0, UTC).getMillis()));
         assertEquals(row.getField(6), new Timestamp(new DateTime(1980, 5, 7, 11, 22, 33, 456, UTC).getMillis()));
+        assertEquals(row.getField(7), new BigDecimal("3.14"));
+        assertEquals(row.getField(8), new BigDecimal("12345678901234567890.0123456789"));
         assertUpdate("DROP TABLE test_types_table");
 
         assertFalse(queryRunner.tableExists(getSession(), "test_types_table"));
@@ -132,7 +141,9 @@ public class TestHiveIntegrationSmokeTest
             throws Exception
     {
         for (HiveStorageFormat storageFormat : HiveStorageFormat.values()) {
-            createPartitionedTable(storageFormat);
+            if (insertOperationsSupported(storageFormat)) {
+                createPartitionedTable(storageFormat);
+            }
         }
     }
 
@@ -141,17 +152,20 @@ public class TestHiveIntegrationSmokeTest
     {
         @Language("SQL") String createTable = "" +
                 "CREATE TABLE test_partitioned_table (" +
-                "  _partition_varchar VARCHAR" +
-                ", _partition_bigint BIGINT" +
-                ", _varchar VARCHAR" +
-                ", _varbinary VARBINARY" +
+                "  _varchar VARCHAR" +
                 ", _bigint BIGINT" +
                 ", _double DOUBLE" +
                 ", _boolean BOOLEAN" +
+                ", _decimal_short DECIMAL(3,2)" +
+                ", _decimal_long DECIMAL(30,10)" +
+                ", _partition_varchar VARCHAR" +
+                ", _partition_bigint BIGINT" +
+                ", _partition_decimal_short DECIMAL(3,2)" +
+                ", _partition_decimal_long DECIMAL(30,10)" +
                 ") " +
                 "WITH (" +
                 "format = '" + storageFormat + "', " +
-                "partitioned_by = ARRAY[ '_partition_varchar', '_partition_bigint' ]" +
+                "partitioned_by = ARRAY[ '_partition_varchar', '_partition_bigint', '_partition_decimal_short', '_partition_decimal_long' ]" +
                 ") ";
 
         assertUpdate(createTable);
@@ -159,14 +173,31 @@ public class TestHiveIntegrationSmokeTest
         TableMetadata tableMetadata = getTableMetadata("test_partitioned_table");
         assertEquals(tableMetadata.getMetadata().getProperties().get(STORAGE_FORMAT_PROPERTY), storageFormat);
 
-        List<String> partitionedBy = ImmutableList.of("_partition_varchar", "_partition_bigint");
+        List<String> partitionedBy = ImmutableList.of("_partition_varchar", "_partition_bigint", "_partition_decimal_short", "_partition_decimal_long");
         assertEquals(tableMetadata.getMetadata().getProperties().get(PARTITIONED_BY_PROPERTY), partitionedBy);
         for (ColumnMetadata columnMetadata : tableMetadata.getColumns()) {
-            assertEquals(columnMetadata.isPartitionKey(), partitionedBy.contains(columnMetadata.getName()));
+            boolean partitionKey = partitionedBy.contains(columnMetadata.getName());
+            assertEquals(columnMetadata.getComment(), annotateColumnComment(null, partitionKey));
         }
 
         MaterializedResult result = computeActual("SELECT * from test_partitioned_table");
         assertEquals(result.getRowCount(), 0);
+
+        @Language("SQL") String select = "" +
+                "SELECT" +
+                " 'foo' _varchar" +
+                ", 1 _bigint" +
+                ", cast('3.14' AS DOUBLE) _double" +
+                ", true _boolean" +
+                ", 3.14 _decimal_short" +
+                ", 12345678901234567890.0123456789 _decimal_long" +
+                ", 'foo' _varchar" +
+                ", 1 _bigint" +
+                ", 3.14 _partition_decimal_short" +
+                ", 12345678901234567890.0123456789 _partition_decimal_long";
+
+        assertUpdate("INSERT INTO test_partitioned_table " + select, 1);
+        assertQuery("SELECT * from test_partitioned_table", select);
 
         assertUpdate("DROP TABLE test_partitioned_table");
 
@@ -178,7 +209,9 @@ public class TestHiveIntegrationSmokeTest
             throws Exception
     {
         for (HiveStorageFormat storageFormat : HiveStorageFormat.values()) {
-            createTableAs(storageFormat);
+            if (insertOperationsSupported(storageFormat)) {
+                createTableAs(storageFormat);
+            }
         }
     }
 
@@ -188,8 +221,10 @@ public class TestHiveIntegrationSmokeTest
         @Language("SQL") String select = "SELECT" +
                 " 'foo' _varchar" +
                 ", 1 _bigint" +
-                ", 3.14 _double" +
-                ", true _boolean";
+                ", CAST(3.14 AS DOUBLE) _double" +
+                ", true _boolean" +
+                ", 3.14 _decimal_short" +
+                ", 12345678901234567890.0123456789 _decimal_long";
 
         String createTableAs = String.format("CREATE TABLE test_format_table WITH (format = '%s') AS %s", storageFormat, select);
 
@@ -235,13 +270,13 @@ public class TestHiveIntegrationSmokeTest
         List<String> partitionedBy = ImmutableList.of("ship_priority", "order_status");
         assertEquals(tableMetadata.getMetadata().getProperties().get(PARTITIONED_BY_PROPERTY), partitionedBy);
         for (ColumnMetadata columnMetadata : tableMetadata.getColumns()) {
-            assertEquals(columnMetadata.isPartitionKey(), partitionedBy.contains(columnMetadata.getName()));
+            boolean partitionKey = partitionedBy.contains(columnMetadata.getName());
+            assertEquals(columnMetadata.getComment(), annotateColumnComment(null, partitionKey));
         }
 
         List<HivePartition> partitions = getPartitions("test_create_partitioned_table_as");
         assertEquals(partitions.size(), 3);
 
-        // Hive will reorder the partition keys to the end
         assertQuery("SELECT * from test_create_partitioned_table_as", "SELECT orderkey, shippriority, orderstatus FROM orders");
 
         assertUpdate("DROP TABLE test_create_partitioned_table_as");
@@ -249,12 +284,53 @@ public class TestHiveIntegrationSmokeTest
         assertFalse(queryRunner.tableExists(getSession(), "test_create_partitioned_table_as"));
     }
 
+    @Test(expectedExceptions = RuntimeException.class, expectedExceptionsMessageRegExp = "Partition keys must be the last columns in the table and in the same order as the table properties.*")
+    public void testCreatePartitionedTableInvalidColumnOrdering()
+    {
+        assertUpdate("" +
+                "CREATE TABLE test_create_table_invalid_column_ordering\n" +
+                "(grape bigint, apple varchar, orange bigint, pear varchar)\n" +
+                "WITH (partitioned_by = ARRAY['apple'])");
+    }
+
+    @Test(expectedExceptions = RuntimeException.class, expectedExceptionsMessageRegExp = "Partition keys must be the last columns in the table and in the same order as the table properties.*")
+    public void testCreatePartitionedTableAsInvalidColumnOrdering()
+            throws Exception
+    {
+        assertUpdate("" +
+                "CREATE TABLE test_create_table_as_invalid_column_ordering " +
+                "WITH (partitioned_by = ARRAY['SHIP_PRIORITY', 'ORDER_STATUS']) " +
+                "AS " +
+                "SELECT shippriority AS ship_priority, orderkey AS order_key, orderstatus AS order_status " +
+                "FROM tpch.tiny.orders");
+    }
+
+    @Test(expectedExceptions = RuntimeException.class, expectedExceptionsMessageRegExp = "Table contains only partition columns")
+    public void testCreateTableOnlyPartitionColumns()
+    {
+        assertUpdate("" +
+                "CREATE TABLE test_create_table_only_partition_columns\n" +
+                "(grape bigint, apple varchar, orange bigint, pear varchar)\n" +
+                "WITH (partitioned_by = ARRAY['grape', 'apple', 'orange', 'pear'])");
+    }
+
+    @Test(expectedExceptions = RuntimeException.class, expectedExceptionsMessageRegExp = "Partition columns .* not present in schema")
+    public void testCreateTableNonExistentPartitionColumns()
+    {
+        assertUpdate("" +
+                "CREATE TABLE test_create_table_nonexistent_partition_columns\n" +
+                "(grape bigint, apple varchar, orange bigint, pear varchar)\n" +
+                "WITH (partitioned_by = ARRAY['dragonfruit'])");
+    }
+
     @Test
     public void insertTable()
             throws Exception
     {
         for (HiveStorageFormat storageFormat : HiveStorageFormat.values()) {
-            insertTable(storageFormat);
+            if (insertOperationsSupported(storageFormat)) {
+                insertTable(storageFormat);
+            }
         }
     }
 
@@ -267,7 +343,9 @@ public class TestHiveIntegrationSmokeTest
                 "  _varchar VARCHAR," +
                 "  _bigint BIGINT," +
                 "  _double DOUBLE," +
-                "  _boolean BOOLEAN" +
+                "  _boolean BOOLEAN," +
+                "  _decimal_short DECIMAL(3,2)," +
+                "  _decimal_long DECIMAL(30,10)" +
                 ") " +
                 "WITH (format = '" + storageFormat + "') ";
 
@@ -279,20 +357,26 @@ public class TestHiveIntegrationSmokeTest
         @Language("SQL") String select = "SELECT" +
                 " 'foo' _varchar" +
                 ", 1 _bigint" +
-                ", 3.14 _double" +
-                ", true _boolean";
+                ", CAST(3.14 as DOUBLE) _double" +
+                ", true _boolean" +
+                ", 3.14 _decimal_short" +
+                ", 12345678901234567890.0123456789 _decimal_long";
 
         assertUpdate("INSERT INTO test_insert_format_table " + select, 1);
 
         assertQuery("SELECT * from test_insert_format_table", select);
 
-        assertUpdate("INSERT INTO test_insert_format_table (_bigint, _double) SELECT 2, 14.3", 1);
+        assertUpdate("INSERT INTO test_insert_format_table (_bigint, _double) SELECT 2, DOUBLE '14.3'", 1);
 
-        assertQuery("SELECT * from test_insert_format_table where _bigint = 2", "SELECT null, 2, 14.3, null");
+        assertQuery("SELECT * from test_insert_format_table where _bigint = 2", "SELECT null, 2, 14.3, null, null, null");
 
-        assertUpdate("INSERT INTO test_insert_format_table (_double, _bigint) SELECT 2.72, 3", 1);
+        assertUpdate("INSERT INTO test_insert_format_table (_double, _bigint) SELECT DOUBLE '2.72', 3", 1);
 
-        assertQuery("SELECT * from test_insert_format_table where _bigint = 3", "SELECT null, 3, 2.72, null");
+        assertQuery("SELECT * from test_insert_format_table where _bigint = 3", "SELECT null, 3, 2.72, null, null, null");
+
+        assertUpdate("INSERT INTO test_insert_format_table (_decimal_short, _decimal_long) SELECT DECIMAL '2.72', DECIMAL '98765432101234567890.0123456789'", 1);
+
+        assertQuery("SELECT * from test_insert_format_table where _decimal_long = 98765432101234567890.0123456789", "SELECT null, null, null, null, 2.72, 98765432101234567890.0123456789");
 
         assertUpdate("DROP TABLE test_insert_format_table");
 
@@ -314,9 +398,9 @@ public class TestHiveIntegrationSmokeTest
         @Language("SQL") String createTable = "" +
                 "CREATE TABLE test_insert_partitioned_table " +
                 "(" +
-                "  ORDER_STATUS VARCHAR," +
+                "  ORDER_KEY BIGINT," +
                 "  SHIP_PRIORITY BIGINT," +
-                "  ORDER_KEY BIGINT" +
+                "  ORDER_STATUS VARCHAR" +
                 ") " +
                 "WITH (" +
                 "format = '" + storageFormat + "', " +
@@ -328,6 +412,10 @@ public class TestHiveIntegrationSmokeTest
         TableMetadata tableMetadata = getTableMetadata("test_insert_partitioned_table");
         assertEquals(tableMetadata.getMetadata().getProperties().get(STORAGE_FORMAT_PROPERTY), storageFormat);
         assertEquals(tableMetadata.getMetadata().getProperties().get(PARTITIONED_BY_PROPERTY), ImmutableList.of("ship_priority", "order_status"));
+
+        assertQuery(
+                "SHOW PARTITIONS FROM test_insert_partitioned_table",
+                "SELECT shippriority, orderstatus FROM orders LIMIT 0");
 
         // Hive will reorder the partition keys, so we must insert into the table assuming the partition keys have been moved to the end
         assertUpdate("" +
@@ -341,6 +429,18 @@ public class TestHiveIntegrationSmokeTest
         assertEquals(partitions.size(), 3);
 
         assertQuery("SELECT * from test_insert_partitioned_table", "SELECT orderkey, shippriority, orderstatus FROM orders");
+
+        assertQuery(
+                "SHOW PARTITIONS FROM test_insert_partitioned_table",
+                "SELECT DISTINCT shippriority, orderstatus FROM orders");
+
+        assertQuery(
+                "SHOW PARTITIONS FROM test_insert_partitioned_table ORDER BY order_status LIMIT 2",
+                "SELECT DISTINCT shippriority, orderstatus FROM orders ORDER BY orderstatus LIMIT 2");
+
+        assertQuery(
+                "SHOW PARTITIONS FROM test_insert_partitioned_table WHERE order_status = 'O'",
+                "SELECT DISTINCT shippriority, orderstatus FROM orders WHERE orderstatus = 'O'");
 
         assertUpdate("DROP TABLE test_insert_partitioned_table");
 
@@ -377,9 +477,9 @@ public class TestHiveIntegrationSmokeTest
         @Language("SQL") String createTable = "" +
                 "CREATE TABLE test_metadata_delete " +
                 "(" +
-                "  LINE_STATUS VARCHAR," +
+                "  ORDER_KEY BIGINT," +
                 "  LINE_NUMBER BIGINT," +
-                "  ORDER_KEY BIGINT" +
+                "  LINE_STATUS VARCHAR" +
                 ") " +
                 "WITH (" +
                 STORAGE_FORMAT_PROPERTY + " = '" + storageFormat + "', " +
@@ -388,7 +488,6 @@ public class TestHiveIntegrationSmokeTest
 
         assertUpdate(createTable);
 
-        // Hive will reorder the partition keys, so we must insert into the table assuming the partition keys have been moved to the end
         assertUpdate("" +
                         "INSERT INTO test_metadata_delete " +
                         "SELECT orderkey, linenumber, linestatus " +
@@ -424,22 +523,49 @@ public class TestHiveIntegrationSmokeTest
     {
         Session session = getSession();
         Metadata metadata = ((DistributedQueryRunner) queryRunner).getCoordinator().getMetadata();
-        Optional<TableHandle> tableHandle = metadata.getTableHandle(session, new QualifiedObjectName(HIVE_CATALOG, TPCH_SCHEMA, tableName));
-        assertTrue(tableHandle.isPresent());
-        return metadata.getTableMetadata(session, tableHandle.get());
+
+        return transaction(queryRunner.getTransactionManager())
+                .readOnly()
+                .execute(session, transactionSession -> {
+                    Optional<TableHandle> tableHandle = metadata.getTableHandle(transactionSession, new QualifiedObjectName(HIVE_CATALOG, TPCH_SCHEMA, tableName));
+                    assertTrue(tableHandle.isPresent());
+                    return metadata.getTableMetadata(transactionSession, tableHandle.get());
+                });
     }
 
     private List<HivePartition> getPartitions(String tableName)
     {
         Session session = getSession();
         Metadata metadata = ((DistributedQueryRunner) queryRunner).getCoordinator().getMetadata();
-        Optional<TableHandle> tableHandle = metadata.getTableHandle(session, new QualifiedObjectName(HIVE_CATALOG, TPCH_SCHEMA, tableName));
-        assertTrue(tableHandle.isPresent());
 
-        List<TableLayoutResult> layouts = metadata.getLayouts(session, tableHandle.get(), Constraint.alwaysTrue(), Optional.empty());
-        TableLayout layout = Iterables.getOnlyElement(layouts).getLayout();
-        List<HivePartition> partitions = ((HiveTableLayoutHandle) layout.getHandle().getConnectorHandle()).getPartitions().get();
-        return partitions;
+        return transaction(queryRunner.getTransactionManager())
+                .readOnly()
+                .execute(session, transactionSession -> {
+                    Optional<TableHandle> tableHandle = metadata.getTableHandle(transactionSession, new QualifiedObjectName(HIVE_CATALOG, TPCH_SCHEMA, tableName));
+                    assertTrue(tableHandle.isPresent());
+
+                    List<TableLayoutResult> layouts = metadata.getLayouts(transactionSession, tableHandle.get(), Constraint.alwaysTrue(), Optional.empty());
+                    TableLayout layout = Iterables.getOnlyElement(layouts).getLayout();
+                    return ((HiveTableLayoutHandle) layout.getHandle().getConnectorHandle()).getPartitions().get();
+                });
+    }
+
+    @Test
+    public void testShowColumnsPartitionKey()
+    {
+        assertUpdate("" +
+                "CREATE TABLE test_show_columns_partition_key\n" +
+                "(grape bigint, orange bigint, pear varchar, apple varchar)\n" +
+                "WITH (partitioned_by = ARRAY['apple'])");
+
+        MaterializedResult actual = computeActual("SHOW COLUMNS FROM test_show_columns_partition_key");
+        MaterializedResult expected = resultBuilder(getSession(), VARCHAR, VARCHAR, VARCHAR)
+                .row("grape", "bigint", "")
+                .row("orange", "bigint", "")
+                .row("pear", "varchar", "")
+                .row("apple", "varchar", "Partition Key")
+                .build();
+        assertEquals(actual, expected);
     }
 
     // TODO: These should be moved to another class, when more connectors support arrays
@@ -451,7 +577,7 @@ public class TestHiveIntegrationSmokeTest
         assertQuery("SELECT col[2] FROM tmp_array1", "SELECT 2");
         assertQuery("SELECT col[3] FROM tmp_array1", "SELECT NULL");
 
-        assertUpdate("CREATE TABLE tmp_array2 AS SELECT ARRAY[1.0, 2.5, 3.5] AS col", 1);
+        assertUpdate("CREATE TABLE tmp_array2 AS SELECT ARRAY[DOUBLE '1.0', DOUBLE '2.5', DOUBLE '3.5'] AS col", 1);
         assertQuery("SELECT col[2] FROM tmp_array2", "SELECT 2.5");
 
         assertUpdate("CREATE TABLE tmp_array3 AS SELECT ARRAY['puppies', 'kittens', NULL] AS col", 1);
@@ -468,6 +594,10 @@ public class TestHiveIntegrationSmokeTest
         assertUpdate("CREATE TABLE tmp_array6 AS SELECT ARRAY[ARRAY['\"hi\"'], NULL, ARRAY['puppies']] AS col", 1);
         assertQuery("SELECT col[1][1] FROM tmp_array6", "SELECT '\"hi\"'");
         assertQuery("SELECT col[3][1] FROM tmp_array6", "SELECT 'puppies'");
+
+        assertUpdate("CREATE TABLE tmp_array9 AS SELECT ARRAY[ARRAY[DECIMAL '3.14']] AS col1, ARRAY[ARRAY[DECIMAL '12345678901234567890.0123456789']] AS col2", 1);
+        assertQuery("SELECT col1[1][1] FROM tmp_array9", "SELECT 3.14");
+        assertQuery("SELECT col2[1][1] FROM tmp_array9", "SELECT 12345678901234567890.0123456789");
     }
 
     @Test
@@ -488,7 +618,7 @@ public class TestHiveIntegrationSmokeTest
         assertQuery("SELECT col[0] FROM tmp_map1", "SELECT 2");
         assertQuery("SELECT col[1] FROM tmp_map1", "SELECT NULL");
 
-        assertUpdate("CREATE TABLE tmp_map2 AS SELECT MAP(ARRAY[1.0], ARRAY[2.5]) AS col", 1);
+        assertUpdate("CREATE TABLE tmp_map2 AS SELECT MAP(ARRAY[DOUBLE '1.0'], ARRAY[DOUBLE '2.5']) AS col", 1);
         assertQuery("SELECT col[1.0] FROM tmp_map2", "SELECT 2.5");
 
         assertUpdate("CREATE TABLE tmp_map3 AS SELECT MAP(ARRAY['puppies'], ARRAY['kittens']) AS col", 1);
@@ -497,13 +627,17 @@ public class TestHiveIntegrationSmokeTest
         assertUpdate("CREATE TABLE tmp_map4 AS SELECT MAP(ARRAY[TRUE], ARRAY[FALSE]) AS col", 1);
         assertQuery("SELECT col[TRUE] FROM tmp_map4", "SELECT FALSE");
 
-        assertUpdate("CREATE TABLE tmp_map5 AS SELECT MAP(ARRAY[1.0], ARRAY[ARRAY[1, 2]]) AS col", 1);
+        assertUpdate("CREATE TABLE tmp_map5 AS SELECT MAP(ARRAY[DOUBLE '1.0'], ARRAY[ARRAY[1, 2]]) AS col", 1);
         assertQuery("SELECT col[1.0][2] FROM tmp_map5", "SELECT 2");
 
         assertUpdate("CREATE TABLE tmp_map6 AS SELECT MAP(ARRAY[DATE '2014-09-30'], ARRAY[DATE '2014-09-29']) AS col", 1);
         assertOneNotNullResult("SELECT col[DATE '2014-09-30'] FROM tmp_map6");
         assertUpdate("CREATE TABLE tmp_map7 AS SELECT MAP(ARRAY[TIMESTAMP '2001-08-22 03:04:05.321'], ARRAY[TIMESTAMP '2001-08-22 03:04:05.321']) AS col", 1);
         assertOneNotNullResult("SELECT col[TIMESTAMP '2001-08-22 03:04:05.321'] FROM tmp_map7");
+
+        assertUpdate("CREATE TABLE tmp_map8 AS SELECT MAP(ARRAY[DECIMAL '3.14', DECIMAL '12345678901234567890.0123456789'], " +
+                "ARRAY[DECIMAL '12345678901234567890.0123456789', DECIMAL '3.14']) AS col", 1);
+        assertQuery("SELECT col[3.14], col[12345678901234567890.0123456789] FROM tmp_map8", "SELECT 12345678901234567890.0123456789, 3.14");
     }
 
     @Test
@@ -522,7 +656,7 @@ public class TestHiveIntegrationSmokeTest
             throws Exception
     {
         assertUpdate("CREATE TABLE tmp_complex1 AS SELECT " +
-                "ARRAY [MAP(ARRAY['a', 'b'], ARRAY[2.0, 4.0]), MAP(ARRAY['c', 'd'], ARRAY[12.0, 14.0])] AS a",
+                "ARRAY [MAP(ARRAY['a', 'b'], ARRAY[DOUBLE '2.0', DOUBLE '4.0']), MAP(ARRAY['c', 'd'], ARRAY[DOUBLE '12.0', DOUBLE '14.0'])] AS a",
                 1);
 
         assertQuery(
@@ -536,5 +670,10 @@ public class TestHiveIntegrationSmokeTest
         assertEquals(results.getRowCount(), 1);
         assertEquals(results.getMaterializedRows().get(0).getFieldCount(), 1);
         assertNotNull(results.getMaterializedRows().get(0).getField(0));
+    }
+
+    private boolean insertOperationsSupported(HiveStorageFormat storageFormat)
+    {
+        return storageFormat != HiveStorageFormat.DWRF;
     }
 }

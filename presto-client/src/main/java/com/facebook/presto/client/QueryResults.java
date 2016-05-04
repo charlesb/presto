@@ -13,7 +13,10 @@
  */
 package com.facebook.presto.client;
 
+import com.facebook.presto.spi.type.NamedTypeSignature;
+import com.facebook.presto.spi.type.ParameterKind;
 import com.facebook.presto.spi.type.TypeSignature;
+import com.facebook.presto.spi.type.TypeSignatureParameter;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
@@ -35,6 +38,7 @@ import static com.facebook.presto.spi.type.StandardTypes.ARRAY;
 import static com.facebook.presto.spi.type.StandardTypes.BIGINT;
 import static com.facebook.presto.spi.type.StandardTypes.BOOLEAN;
 import static com.facebook.presto.spi.type.StandardTypes.DATE;
+import static com.facebook.presto.spi.type.StandardTypes.DECIMAL;
 import static com.facebook.presto.spi.type.StandardTypes.DOUBLE;
 import static com.facebook.presto.spi.type.StandardTypes.INTERVAL_DAY_TO_SECOND;
 import static com.facebook.presto.spi.type.StandardTypes.INTERVAL_YEAR_TO_MONTH;
@@ -224,13 +228,13 @@ public class QueryResults
         if (signature.getBase().equals(ARRAY)) {
             List<Object> fixedValue = new ArrayList<>();
             for (Object object : List.class.cast(value)) {
-                fixedValue.add(fixValue(signature.getParameters().get(0).toString(), object));
+                fixedValue.add(fixValue(signature.getTypeParametersAsTypeSignatures().get(0).toString(), object));
             }
             return fixedValue;
         }
         if (signature.getBase().equals(MAP)) {
-            String keyType = signature.getParameters().get(0).toString();
-            String valueType = signature.getParameters().get(1).toString();
+            String keyType = signature.getTypeParametersAsTypeSignatures().get(0).toString();
+            String valueType = signature.getTypeParametersAsTypeSignatures().get(1).toString();
             Map<Object, Object> fixedValue = new HashMap<>();
             for (Map.Entry<?, ?> entry : (Set<Map.Entry<?, ?>>) Map.class.cast(value).entrySet()) {
                 fixedValue.put(fixValue(keyType, entry.getKey()), fixValue(valueType, entry.getValue()));
@@ -240,14 +244,20 @@ public class QueryResults
         if (signature.getBase().equals(ROW)) {
             Map<String, Object> fixedValue = new LinkedHashMap<>();
             List<Object> listValue = List.class.cast(value);
-            checkArgument(listValue.size() == signature.getLiteralParameters().size(), "Mismatched data values and row type");
+            checkArgument(listValue.size() == signature.getParameters().size(), "Mismatched data values and row type");
             for (int i = 0; i < listValue.size(); i++) {
-                String key = (String) signature.getLiteralParameters().get(i);
-                fixedValue.put(key, fixValue(signature.getParameters().get(i).toString(), listValue.get(i)));
+                TypeSignatureParameter parameter = signature.getParameters().get(i);
+                checkArgument(
+                        parameter.getKind() == ParameterKind.NAMED_TYPE,
+                        "Unexpected parameter [%s] for row type",
+                        parameter);
+                NamedTypeSignature namedTypeSignature = parameter.getNamedTypeSignature();
+                String key = namedTypeSignature.getName();
+                fixedValue.put(key, fixValue(namedTypeSignature.getTypeSignature().toString(), listValue.get(i)));
             }
             return fixedValue;
         }
-        switch (type) {
+        switch (signature.getBase()) {
             case BIGINT:
                 if (value instanceof String) {
                     return Long.parseLong((String) value);
@@ -272,6 +282,7 @@ public class QueryResults
             case DATE:
             case INTERVAL_YEAR_TO_MONTH:
             case INTERVAL_DAY_TO_SECOND:
+            case DECIMAL:
                 return String.class.cast(value);
             default:
                 // for now we assume that only the explicit types above are passed

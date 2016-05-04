@@ -33,6 +33,7 @@ import java.util.Optional;
 
 import static com.facebook.presto.spi.type.BigintType.BIGINT;
 import static com.facebook.presto.spi.type.BooleanType.BOOLEAN;
+import static com.facebook.presto.spi.type.DecimalType.createDecimalType;
 import static com.facebook.presto.spi.type.DoubleType.DOUBLE;
 import static com.facebook.presto.spi.type.HyperLogLogType.HYPER_LOG_LOG;
 import static com.facebook.presto.spi.type.TimestampType.TIMESTAMP;
@@ -124,25 +125,25 @@ public final class TestingRowConstructor
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<boolean,array<bigint>>('col0','col1')")
-    public static Block testRowBooleanArray(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array<bigint>") Block arg2)
+    @SqlType("row<boolean,array(bigint)>('col0','col1')")
+    public static Block testRowBooleanArray(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array(bigint)") Block arg2)
     {
         List<Type> parameterTypes = ImmutableList.of(BOOLEAN, new ArrayType(BIGINT));
         return toStackRepresentation(parameterTypes, arg1, arg2);
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<boolean,array<bigint>,map<bigint,double>>('col0','col1','col2')")
-    public static Block testRowBooleanArrayMap(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array<bigint>") Block arg2,
-                                               @Nullable @SqlType("map<bigint,double>") Block arg3)
+    @SqlType("row<boolean,array(bigint),map(bigint,double)>('col0','col1','col2')")
+    public static Block testRowBooleanArrayMap(@Nullable @SqlType(StandardTypes.BOOLEAN) Boolean arg1, @Nullable @SqlType("array(bigint)") Block arg2,
+                                               @Nullable @SqlType("map(bigint,double)") Block arg3)
     {
         List<Type> parameterTypes = ImmutableList.of(BOOLEAN, new ArrayType(BIGINT), new MapType(BIGINT, DOUBLE));
         return toStackRepresentation(parameterTypes, arg1, arg2, arg3);
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<double,array<bigint>,row<bigint,double>('col0','col1')>('col0','col1','col2')")
-    public static Block testNestedRow(@Nullable @SqlType(StandardTypes.DOUBLE) Double arg1, @Nullable @SqlType("array<bigint>") Block arg2,
+    @SqlType("row<double,array(bigint),row<bigint,double>('col0','col1')>('col0','col1','col2')")
+    public static Block testNestedRow(@Nullable @SqlType(StandardTypes.DOUBLE) Double arg1, @Nullable @SqlType("array(bigint)") Block arg2,
                                                @Nullable @SqlType("row<bigint,double>('col0','col1')") Block arg3)
     {
         List<Type> parameterTypes = ImmutableList.of(
@@ -152,10 +153,10 @@ public final class TestingRowConstructor
     }
 
     @ScalarFunction("test_row")
-    @SqlType("row<double,array<row<bigint,double>('col0','col1')>,row<bigint,double>('col0','col1')>('col0','col1','col2')")
+    @SqlType("row<double,array(row<bigint,double>('col0','col1')),row<bigint,double>('col0','col1')>('col0','col1','col2')")
     public static Block testNestedRowWithArray(
             @Nullable @SqlType(StandardTypes.DOUBLE) Double arg1,
-            @Nullable @SqlType("array<row<bigint,double>('col0','col1')>") Block arg2,
+            @Nullable @SqlType("array(row<bigint,double>('col0','col1'))") Block arg2,
             @Nullable @SqlType("row<bigint,double>('col0','col1')") Block arg3)
     {
         List<Type> parameterTypes = ImmutableList.of(
@@ -181,5 +182,12 @@ public final class TestingRowConstructor
             appendToBlockBuilder(parameterTypes.get(i), values[i], blockBuilder);
         }
         return blockBuilder.build();
+    }
+
+    @ScalarFunction("test_row")
+    @SqlType("row<decimal(2,1),decimal(22,10)>('col0','col1')")
+    public static Block testRowDecimalDecimal(@Nullable @SqlType("decimal(2,1)") Long arg1, @Nullable @SqlType("decimal(22,10)") Slice arg2)
+    {
+        return toStackRepresentation(ImmutableList.of(createDecimalType(2, 1), createDecimalType(22, 10)), arg1, arg2);
     }
 }

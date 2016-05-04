@@ -14,6 +14,7 @@
 package com.facebook.presto.sql.tree;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 import static com.google.common.base.MoreObjects.toStringHelper;
@@ -36,7 +37,7 @@ public class AliasedRelation
         this(Optional.of(location), relation, alias, columnNames);
     }
 
-    private AliasedRelation(Optional<NodeLocation> location, Relation relation, String alias, List<String> columnNames)
+    protected AliasedRelation(Optional<NodeLocation> location, Relation relation, String alias, List<String> columnNames)
     {
         super(location);
         requireNonNull(relation, "relation is null");
@@ -90,26 +91,14 @@ public class AliasedRelation
         }
 
         AliasedRelation that = (AliasedRelation) o;
-
-        if (!alias.equals(that.alias)) {
-            return false;
-        }
-        if (columnNames != null ? !columnNames.equals(that.columnNames) : that.columnNames != null) {
-            return false;
-        }
-        if (!relation.equals(that.relation)) {
-            return false;
-        }
-
-        return true;
+        return Objects.equals(relation, that.relation) &&
+                Objects.equals(alias, that.alias) &&
+                Objects.equals(columnNames, that.columnNames);
     }
 
     @Override
     public int hashCode()
     {
-        int result = relation.hashCode();
-        result = 31 * result + alias.hashCode();
-        result = 31 * result + (columnNames != null ? columnNames.hashCode() : 0);
-        return result;
+        return Objects.hash(relation, alias, columnNames);
     }
 }

@@ -257,6 +257,13 @@ public abstract class DefaultTraversalVisitor<R, C>
     }
 
     @Override
+    protected R visitTryExpression(TryExpression node, C context)
+    {
+        process(node.getInnerExpression(), context);
+        return null;
+    }
+
+    @Override
     protected R visitArithmeticUnary(ArithmeticUnaryExpression node, C context)
     {
         return process(node.getValue(), context);
@@ -436,6 +443,22 @@ public abstract class DefaultTraversalVisitor<R, C>
             process(expression, context);
         }
 
+        return null;
+    }
+
+    @Override
+    protected R visitInsert(Insert node, C context)
+    {
+        process(node.getQuery(), context);
+        return null;
+    }
+
+    @Override
+    protected R visitSimpleGroupBy(SimpleGroupBy node, C context)
+    {
+        for (Expression expression : node.getColumnExpressions()) {
+            process(expression, context);
+        }
         return null;
     }
 }

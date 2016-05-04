@@ -14,15 +14,15 @@
 package com.facebook.presto.metadata;
 
 import com.facebook.presto.operator.scalar.ScalarFunctionImplementation;
-import com.facebook.presto.spi.type.Type;
 import com.facebook.presto.spi.type.TypeManager;
 import com.facebook.presto.spi.type.TypeSignature;
-import com.facebook.presto.util.ImmutableCollectors;
 import com.google.common.collect.ImmutableList;
 
 import java.lang.invoke.MethodHandle;
 import java.util.List;
-import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static com.facebook.presto.metadata.FunctionRegistry.mangleOperatorName;
 import static java.util.Objects.requireNonNull;
@@ -32,18 +32,33 @@ public abstract class SqlOperator
 {
     public static SqlOperator create(
             OperatorType operatorType,
+            List<TypeVariableConstraint> typeVariableConstraints,
+            List<LongVariableConstraint> longVariableConstraints,
             List<TypeSignature> argumentTypes,
             TypeSignature returnType,
             MethodHandle methodHandle,
+            Optional<MethodHandle> instanceFactory,
             boolean nullable,
-            List<Boolean> nullableArguments)
+            List<Boolean> nullableArguments,
+            Set<String> literalParameters)
     {
-        return new SimpleSqlOperator(operatorType, argumentTypes, returnType, methodHandle, nullable, nullableArguments);
+        List<String> arugmentTypesAsString = argumentTypes.stream().map(TypeSignature::toString).collect(Collectors.toList());
+        return new SimpleSqlOperator(operatorType, typeVariableConstraints, longVariableConstraints, arugmentTypesAsString, returnType, methodHandle, instanceFactory, nullable, nullableArguments, literalParameters);
     }
 
-    protected SqlOperator(OperatorType operatorType, List<TypeParameter> typeParameters, String returnType, List<String> argumentTypes)
+    protected SqlOperator(OperatorType operatorType, TypeSignature returnType, List<TypeSignature> argumentTypes, Set<String> literalParameters)
     {
-        super(mangleOperatorName(operatorType), typeParameters, returnType, argumentTypes);
+        super(mangleOperatorName(operatorType), returnType, argumentTypes, literalParameters);
+    }
+
+    protected SqlOperator(OperatorType operatorType, List<TypeVariableConstraint> typeVariableConstraints, List<LongVariableConstraint> longVariableConstraints,  String returnType, List<String> argumentTypes)
+    {
+        super(mangleOperatorName(operatorType), typeVariableConstraints, longVariableConstraints, returnType, argumentTypes);
+    }
+
+    protected SqlOperator(OperatorType operatorType, List<TypeVariableConstraint> typeVariableConstraints, List<LongVariableConstraint> longVariableConstraints, String returnType, List<String> argumentTypes, Set<String> literalParameters)
+    {
+        super(mangleOperatorName(operatorType), typeVariableConstraints, longVariableConstraints, returnType, argumentTypes, false, literalParameters);
     }
 
     @Override
@@ -69,32 +84,33 @@ public abstract class SqlOperator
             extends SqlOperator
     {
         private final MethodHandle methodHandle;
+        private final Optional<MethodHandle> instanceFactory;
         private final boolean nullable;
         private final List<Boolean> nullableArguments;
 
         public SimpleSqlOperator(
                 OperatorType operatorType,
-                List<TypeSignature> argumentTypes,
+                List<TypeVariableConstraint> typeVariableConstraints,
+                List<LongVariableConstraint> longVariableConstraints,
+                List<String> argumentTypes,
                 TypeSignature returnType,
                 MethodHandle methodHandle,
+                Optional<MethodHandle> instanceFactory,
                 boolean nullable,
-                List<Boolean> nullableArguments)
+                List<Boolean> nullableArguments,
+                Set<String> literalParameters)
         {
-            super(operatorType,
-                    ImmutableList.of(),
-                    returnType.toString(),
-                    argumentTypes.stream()
-                            .map(TypeSignature::toString)
-                            .collect(ImmutableCollectors.toImmutableList()));
+            super(operatorType, typeVariableConstraints, longVariableConstraints, returnType.toString(), argumentTypes, literalParameters);
             this.methodHandle = requireNonNull(methodHandle, "methodHandle is null");
+            this.instanceFactory = requireNonNull(instanceFactory, "instanceFactory is null");
             this.nullable = nullable;
             this.nullableArguments = ImmutableList.copyOf(requireNonNull(nullableArguments, "nullableArguments is null"));
         }
 
         @Override
-        public ScalarFunctionImplementation specialize(Map<String, Type> types, int arity, TypeManager typeManager, FunctionRegistry functionRegistry)
+        public ScalarFunctionImplementation specialize(BoundVariables boundVariables, int arity, TypeManager typeManager, FunctionRegistry functionRegistry)
         {
-            return new ScalarFunctionImplementation(nullable, nullableArguments, methodHandle, isDeterministic());
+            return new ScalarFunctionImplementation(nullable, nullableArguments, methodHandle, instanceFactory, isDeterministic());
         }
     }
 }

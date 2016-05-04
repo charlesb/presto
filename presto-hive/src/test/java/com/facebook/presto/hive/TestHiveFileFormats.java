@@ -13,10 +13,9 @@
  */
 package com.facebook.presto.hive;
 
+import com.facebook.presto.hadoop.shaded.com.google.common.collect.Lists;
 import com.facebook.presto.hive.orc.DwrfPageSourceFactory;
-import com.facebook.presto.hive.orc.DwrfRecordCursorProvider;
 import com.facebook.presto.hive.orc.OrcPageSourceFactory;
-import com.facebook.presto.hive.orc.OrcRecordCursorProvider;
 import com.facebook.presto.hive.parquet.ParquetPageSourceFactory;
 import com.facebook.presto.hive.parquet.ParquetRecordCursorProvider;
 import com.facebook.presto.hive.rcfile.RcFilePageSourceFactory;
@@ -61,6 +60,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.TimeZone;
+import java.util.stream.Collectors;
 
 import static com.facebook.presto.hive.HiveTestUtils.SESSION;
 import static com.facebook.presto.hive.HiveTestUtils.TYPE_MANAGER;
@@ -70,6 +70,7 @@ import static com.facebook.presto.spi.type.VarcharType.VARCHAR;
 import static com.facebook.presto.tests.StructuralTestUtil.arrayBlockOf;
 import static com.facebook.presto.tests.StructuralTestUtil.rowBlockOf;
 import static com.google.common.base.Predicates.not;
+import static com.google.common.collect.Iterables.all;
 import static com.google.common.collect.Iterables.filter;
 import static com.google.common.collect.Iterables.transform;
 import static java.util.stream.Collectors.toList;
@@ -144,10 +145,12 @@ public class TestHiveFileFormats
     public void testRCBinary()
             throws Exception
     {
-        List<TestColumn> testColumns = ImmutableList.copyOf(filter(TEST_COLUMNS, testColumn -> {
-            // RC file does not support complex type as key of a map
-            return !testColumn.getName().equals("t_map_null_key_complex_key_value");
-        }));
+        // RC file does not support complex type as key of a map and interprets empty VARCHAR as nulls
+        List<TestColumn> testColumns = TEST_COLUMNS.stream()
+                .filter(testColumn -> {
+                    String name = testColumn.getName();
+                    return !name.equals("t_map_null_key_complex_key_value") && !name.equals("t_empty_varchar");
+                }).collect(toList());
 
         HiveOutputFormat<?, ?> outputFormat = new RCFileOutputFormat();
         InputFormat<?, ?> inputFormat = new RCFileInputFormat<>();
@@ -197,7 +200,7 @@ public class TestHiveFileFormats
         file.delete();
         try {
             FileSplit split = createTestFile(file.getAbsolutePath(), outputFormat, serde, null, TEST_COLUMNS, NUM_ROWS);
-            testCursorProvider(new OrcRecordCursorProvider(), split, inputFormat, serde, TEST_COLUMNS, NUM_ROWS);
+            testPageSourceFactory(new OrcPageSourceFactory(TYPE_MANAGER, false), split, inputFormat, serde, TEST_COLUMNS);
         }
         finally {
             //noinspection ResultOfMethodCallIgnored
@@ -206,7 +209,7 @@ public class TestHiveFileFormats
     }
 
     @Test
-    public void testOrcDataStream()
+    public void testOrcUseColumnNames()
             throws Exception
     {
         HiveOutputFormat<?, ?> outputFormat = new org.apache.hadoop.hive.ql.io.orc.OrcOutputFormat();
@@ -217,7 +220,10 @@ public class TestHiveFileFormats
         file.delete();
         try {
             FileSplit split = createTestFile(file.getAbsolutePath(), outputFormat, serde, null, TEST_COLUMNS, NUM_ROWS);
-            testPageSourceFactory(new OrcPageSourceFactory(TYPE_MANAGER), split, inputFormat, serde, TEST_COLUMNS);
+            // Reverse the order of the columns to test access by name, not by index
+            List<TestColumn> reversedColumns = Lists.reverse(TEST_COLUMNS);
+            TestingConnectorSession session = new TestingConnectorSession(new HiveSessionProperties(new HiveClientConfig()).getSessionProperties());
+            testPageSourceFactory(new OrcPageSourceFactory(TYPE_MANAGER, true), split, inputFormat, serde, reversedColumns, session);
         }
         finally {
             //noinspection ResultOfMethodCallIgnored
@@ -248,7 +254,7 @@ public class TestHiveFileFormats
         }
     }
 
-    @Test(enabled = false)
+    @Test
     public void testParquetPageSource()
             throws Exception
     {
@@ -320,38 +326,38 @@ public class TestHiveFileFormats
         RowType phoneType = new RowType(ImmutableList.of(VARCHAR, VARCHAR), Optional.empty());
         RowType personType = new RowType(ImmutableList.of(nameType, BIGINT, VARCHAR, new ArrayType(phoneType)), Optional.empty());
 
-        List<TestColumn> testColumns = ImmutableList.<TestColumn>of(
-            new TestColumn(
-                "persons",
-                getStandardListObjectInspector(
-                    getStandardStructObjectInspector(
-                        ImmutableList.of("name", "id", "email", "phones"),
-                        ImmutableList.<ObjectInspector>of(
-                            getStandardStructObjectInspector(
-                              ImmutableList.of("first_name", "last_name"),
-                              ImmutableList.of(javaStringObjectInspector, javaStringObjectInspector)
-                            ),
-                            javaIntObjectInspector,
-                            javaStringObjectInspector,
-                            getStandardListObjectInspector(
-                              getStandardStructObjectInspector(
-                                ImmutableList.of("number", "type"),
-                                ImmutableList.of(javaStringObjectInspector, javaStringObjectInspector)
-                              )
-                            )
-                        )
-                    )
-                ),
-                null,
-                arrayBlockOf(personType,
-                        rowBlockOf(ImmutableList.of(nameType, BIGINT, VARCHAR, new ArrayType(phoneType)),
-                                rowBlockOf(ImmutableList.of(VARCHAR, VARCHAR), "Bob", "Roberts"),
-                                0,
-                                "bob.roberts@example.com",
-                                arrayBlockOf(phoneType, rowBlockOf(ImmutableList.of(VARCHAR, VARCHAR), "1234567890", null))
+        List<TestColumn> testColumns = ImmutableList.of(
+                new TestColumn(
+                        "persons",
+                        getStandardListObjectInspector(
+                                getStandardStructObjectInspector(
+                                        ImmutableList.of("name", "id", "email", "phones"),
+                                        ImmutableList.of(
+                                                getStandardStructObjectInspector(
+                                                        ImmutableList.of("first_name", "last_name"),
+                                                        ImmutableList.of(javaStringObjectInspector, javaStringObjectInspector)
+                                                ),
+                                                javaIntObjectInspector,
+                                                javaStringObjectInspector,
+                                                getStandardListObjectInspector(
+                                                        getStandardStructObjectInspector(
+                                                                ImmutableList.of("number", "type"),
+                                                                ImmutableList.of(javaStringObjectInspector, javaStringObjectInspector)
+                                                        )
+                                                )
+                                        )
+                                )
+                        ),
+                        null,
+                        arrayBlockOf(personType,
+                                rowBlockOf(ImmutableList.of(nameType, BIGINT, VARCHAR, new ArrayType(phoneType)),
+                                        rowBlockOf(ImmutableList.of(VARCHAR, VARCHAR), "Bob", "Roberts"),
+                                        0,
+                                        "bob.roberts@example.com",
+                                        arrayBlockOf(phoneType, rowBlockOf(ImmutableList.of(VARCHAR, VARCHAR), "1234567890", null))
+                                )
                         )
                 )
-            )
         );
 
         InputFormat<?, ?> inputFormat = new MapredParquetInputFormat();
@@ -367,35 +373,9 @@ public class TestHiveFileFormats
     public void testDwrf()
             throws Exception
     {
-        List<TestColumn> testColumns = ImmutableList.copyOf(filter(TEST_COLUMNS, testColumn -> {
-            ObjectInspector objectInspector = testColumn.getObjectInspector();
-            return !hasType(objectInspector, PrimitiveCategory.DATE);
-        }));
-
-        HiveOutputFormat<?, ?> outputFormat = new com.facebook.hive.orc.OrcOutputFormat();
-        InputFormat<?, ?> inputFormat = new com.facebook.hive.orc.OrcInputFormat();
-        @SuppressWarnings("deprecation")
-        SerDe serde = new com.facebook.hive.orc.OrcSerde();
-        File file = File.createTempFile("presto_test", "dwrf");
-        file.delete();
-        try {
-            FileSplit split = createTestFile(file.getAbsolutePath(), outputFormat, serde, null, testColumns, NUM_ROWS);
-            testCursorProvider(new DwrfRecordCursorProvider(), split, inputFormat, serde, testColumns, NUM_ROWS);
-        }
-        finally {
-            //noinspection ResultOfMethodCallIgnored
-            file.delete();
-        }
-    }
-
-    @Test
-    public void testDwrfDataStream()
-            throws Exception
-    {
-        List<TestColumn> testColumns = ImmutableList.copyOf(filter(TEST_COLUMNS, testColumn -> {
-            ObjectInspector objectInspector = testColumn.getObjectInspector();
-            return !hasType(objectInspector, PrimitiveCategory.DATE);
-        }));
+        List<TestColumn> testColumns = filterOutPrimitiveTypes(
+                TEST_COLUMNS,
+                ImmutableList.of(PrimitiveCategory.DATE, PrimitiveCategory.VARCHAR, PrimitiveCategory.CHAR, PrimitiveCategory.DECIMAL));
 
         HiveOutputFormat<?, ?> outputFormat = new com.facebook.hive.orc.OrcOutputFormat();
         InputFormat<?, ?> inputFormat = new com.facebook.hive.orc.OrcInputFormat();
@@ -527,5 +507,13 @@ public class TestHiveFileFormats
             return false;
         }
         throw new IllegalArgumentException("Unknown object inspector type " + objectInspector);
+    }
+
+    private List<TestColumn> filterOutPrimitiveTypes(List<TestColumn> testColumns, List<PrimitiveCategory> primitiveCategories)
+    {
+        return testColumns.stream()
+                .filter(testColumn -> all(primitiveCategories,
+                        primitiveCategory -> !hasType(testColumn.getObjectInspector(), primitiveCategory)))
+                .collect(Collectors.toList());
     }
 }

@@ -49,9 +49,12 @@ import java.util.regex.Pattern;
 import static com.facebook.presto.cli.Completion.commandCompleter;
 import static com.facebook.presto.cli.Completion.lowerCaseCommandCompleter;
 import static com.facebook.presto.cli.Help.getHelpText;
+import static com.facebook.presto.client.ClientSession.stripTransactionId;
 import static com.facebook.presto.client.ClientSession.withCatalogAndSchema;
+import static com.facebook.presto.client.ClientSession.withPreparedStatements;
 import static com.facebook.presto.client.ClientSession.withProperties;
 import static com.facebook.presto.client.ClientSession.withSessionProperties;
+import static com.facebook.presto.client.ClientSession.withTransactionId;
 import static com.facebook.presto.sql.parser.StatementSplitter.Statement;
 import static com.facebook.presto.sql.parser.StatementSplitter.isEmptyStatement;
 import static com.facebook.presto.sql.parser.StatementSplitter.squeezeStatement;
@@ -211,7 +214,8 @@ public class Console
                     Optional<Object> statement = getParsedStatement(split.statement());
                     if (statement.isPresent() && isSessionParameterChange(statement.get())) {
                         Map<String, String> properties = queryRunner.getSession().getProperties();
-                        session = processSessionParameterChange(statement.get(), session, properties);
+                        Map<String, String> preparedStatements = queryRunner.getSession().getPreparedStatements();
+                        session = processSessionParameterChange(statement.get(), session, properties, preparedStatements);
                         queryRunner.setSession(session);
                         tableNameCompleter.populateCache();
                     }
@@ -249,12 +253,13 @@ public class Console
         }
     }
 
-    static ClientSession processSessionParameterChange(Object parsedStatement, ClientSession session, Map<String, String> existingProperties)
+    static ClientSession processSessionParameterChange(Object parsedStatement, ClientSession session, Map<String, String> existingProperties, Map<String, String> existingPreparedStatements)
     {
         if (parsedStatement instanceof Use) {
             Use use = (Use) parsedStatement;
             session = withCatalogAndSchema(session, use.getCatalog().orElse(session.getCatalog()), use.getSchema());
             session = withSessionProperties(session, existingProperties);
+            session = withPreparedStatements(session, existingPreparedStatements);
         }
         return session;
     }
@@ -282,13 +287,33 @@ public class Console
         try (Query query = queryRunner.startQuery(sql)) {
             query.renderOutput(System.out, outputFormat, interactive);
 
+            ClientSession session = queryRunner.getSession();
+
             // update session properties if present
             if (!query.getSetSessionProperties().isEmpty() || !query.getResetSessionProperties().isEmpty()) {
-                Map<String, String> sessionProperties = new HashMap<>(queryRunner.getSession().getProperties());
+                Map<String, String> sessionProperties = new HashMap<>(session.getProperties());
                 sessionProperties.putAll(query.getSetSessionProperties());
                 sessionProperties.keySet().removeAll(query.getResetSessionProperties());
-                queryRunner.setSession(withProperties(queryRunner.getSession(), sessionProperties));
+                session = withProperties(session, sessionProperties);
             }
+
+            // update prepared statements if present
+            if (!query.getAddedPreparedStatements().isEmpty() || !query.getDeallocatedPreparedStatements().isEmpty()) {
+                Map<String, String> preparedStatements = new HashMap<>(session.getPreparedStatements());
+                preparedStatements.putAll(query.getAddedPreparedStatements());
+                preparedStatements.keySet().removeAll(query.getDeallocatedPreparedStatements());
+                session = withPreparedStatements(session, preparedStatements);
+            }
+
+            // update transaction ID if necessary
+            if (query.isClearTransactionId()) {
+                session = stripTransactionId(session);
+            }
+            if (query.getStartedTransactionId() != null) {
+                session = withTransactionId(session, query.getStartedTransactionId());
+            }
+
+            queryRunner.setSession(session);
         }
         catch (RuntimeException e) {
             System.err.println("Error running command: " + e.getMessage());

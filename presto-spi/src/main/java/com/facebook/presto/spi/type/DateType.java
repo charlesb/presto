@@ -70,7 +70,7 @@ public final class DateType
     }
 
     @Override
-    public int hash(Block block, int position)
+    public long hash(Block block, int position)
     {
         return block.getInt(position, 0);
     }
@@ -107,5 +107,17 @@ public final class DateType
     public void writeLong(BlockBuilder blockBuilder, long value)
     {
         blockBuilder.writeInt((int) value).closeEntry();
+    }
+
+    @Override
+    public boolean equals(Object other)
+    {
+        return other == DATE;
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return getClass().hashCode();
     }
 }

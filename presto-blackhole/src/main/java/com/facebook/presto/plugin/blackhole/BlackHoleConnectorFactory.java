@@ -14,14 +14,31 @@
 
 package com.facebook.presto.plugin.blackhole;
 
-import com.facebook.presto.spi.Connector;
-import com.facebook.presto.spi.ConnectorFactory;
+import com.facebook.presto.spi.ConnectorHandleResolver;
+import com.facebook.presto.spi.NodeManager;
+import com.facebook.presto.spi.connector.Connector;
+import com.facebook.presto.spi.connector.ConnectorFactory;
+import com.facebook.presto.spi.type.TypeManager;
+import com.google.common.util.concurrent.ListeningScheduledExecutorService;
 
 import java.util.Map;
+
+import static com.google.common.util.concurrent.MoreExecutors.listeningDecorator;
+import static java.util.Objects.requireNonNull;
+import static java.util.concurrent.Executors.newSingleThreadScheduledExecutor;
 
 public class BlackHoleConnectorFactory
         implements ConnectorFactory
 {
+    private final NodeManager nodeManager;
+    private final TypeManager typeManager;
+
+    public BlackHoleConnectorFactory(NodeManager nodeManager, TypeManager typeManager)
+    {
+        this.nodeManager = requireNonNull(nodeManager, "nodeManager is null");
+        this.typeManager = requireNonNull(typeManager, "typeManager is null");
+    }
+
     @Override
     public String getName()
     {
@@ -29,14 +46,22 @@ public class BlackHoleConnectorFactory
     }
 
     @Override
+    public ConnectorHandleResolver getHandleResolver()
+    {
+        return new BlackHoleHandleResolver();
+    }
+
+    @Override
     public Connector create(String connectorId, Map<String, String> requiredConfig)
     {
+        ListeningScheduledExecutorService executorService = listeningDecorator(newSingleThreadScheduledExecutor());
         return new BlackHoleConnector(
                 new BlackHoleMetadata(),
-                new BlackHoleHandleResolver(),
                 new BlackHoleSplitManager(),
                 new BlackHolePageSourceProvider(),
-                new BlackHolePageSinkProvider()
-        );
+                new BlackHolePageSinkProvider(executorService),
+                new BlackHoleNodePartitioningProvider(connectorId, nodeManager),
+                typeManager,
+                executorService);
     }
 }
